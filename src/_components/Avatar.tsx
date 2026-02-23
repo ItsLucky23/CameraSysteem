@@ -60,7 +60,7 @@ interface FallbackImgProps {
 const FallbackImg = ({ user, formattedName, textSize }: FallbackImgProps) => {
   return (
     <div
-      className={`rounded-full bg-gray-300 text-white flex items-center justify-center w-full h-full select-none ${textSize ?? 'text-lg'}`}
+      className={`rounded-full bg-gray-300 aspect-square text-white flex items-center justify-center w-full h-full select-none ${textSize ?? 'text-lg'}`}
       style={{ backgroundColor: user.avatarFallback }}
     >
       {user.name && user.name !== 'Wachten op speler' ? formattedName : null}
