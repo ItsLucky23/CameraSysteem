@@ -79,6 +79,8 @@ const isPrimitiveMatch = (type: string, value: unknown): boolean => {
   if (type === 'string') return typeof value === 'string';
   if (type === 'number') return typeof value === 'number' && Number.isFinite(value);
   if (type === 'boolean') return typeof value === 'boolean';
+  if (type === 'true') return value === true;
+  if (type === 'false') return value === false;
   if (type === 'null') return value === null;
   if (type === 'undefined') return value === undefined;
   if (type === 'Date') return typeof value === 'string' || value instanceof Date;
@@ -86,7 +88,7 @@ const isPrimitiveMatch = (type: string, value: unknown): boolean => {
 };
 
 const isPrimitiveType = (type: string): boolean => {
-  return ['string', 'number', 'boolean', 'null', 'undefined', 'Date'].includes(type);
+  return ['string', 'number', 'boolean', 'true', 'false', 'null', 'undefined', 'Date'].includes(type);
 };
 
 const validateType = (typeText: string, value: unknown, path: string): ValidationResult => {

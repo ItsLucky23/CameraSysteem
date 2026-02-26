@@ -19,7 +19,7 @@ const MAX_DEPTH = 20;
 const unresolvedPrefix = '__RUNTIME_UNRESOLVED__::';
 
 const PRIMITIVE_TYPES = new Set([
-  'string', 'number', 'boolean', 'null', 'undefined', 'any', 'unknown', 'void', 'never',
+  'string', 'number', 'boolean', 'true', 'false', 'null', 'undefined', 'any', 'unknown', 'void', 'never',
 ]);
 
 // These types are structurally opaque — return them as-is without expansion.
