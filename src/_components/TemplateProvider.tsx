@@ -16,6 +16,7 @@ import { ConfirmMenu } from './ConfirmMenu';
 import { useMenuHandler } from './MenuHandler';
 import useRouter from './Router';
 import ThemeToggler from './ThemeToggler';
+import { useTranslator } from '../_functions/translator';
 
 
 
@@ -47,6 +48,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { session } = useSession();
   const ref = useMenuHandler();
+  const translate = useTranslator();
 
   const handleNavigate = useCallback((path: string) => {
     void router(path);
@@ -100,7 +102,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
           className='bg-container2 border border-container2-border rounded-md py-2 px-6 cursor-pointer font-semibold'
           onClick={handleLogout}
         >
-          Uitloggen
+          {translate({ key: 'template.logout' })}
         </button>
       </div>
 
@@ -145,6 +147,7 @@ export default function TemplateProvider({
   const reactLocation = useLocation();
   const { updateTheme } = ThemeToggler();
   const { socketStatus } = useSocketStatus();
+  const translate = useTranslator();
 
   useEffect(() => {
     if (session?.theme) {
@@ -157,7 +160,7 @@ export default function TemplateProvider({
     return (
       <div className='w-full h-full relative'>
         <div className='absolute top-2 right-2 z-50 bg-red-500 text-white px-2 py-1 rounded-md text-xs font-bold'>
-          Socket status: {socketStatus.self.status}
+          {translate({ key: 'template.socketStatus' })} {socketStatus.self.status}
           {socketStatus.self.status === "RECONNECTING" && socketStatus.self.reconnectAttempt !== undefined ? ` (attempt ${String(socketStatus.self.reconnectAttempt)})` : ''}
         </div>
         <TemplateComponent>{children}</TemplateComponent>

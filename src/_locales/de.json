@@ -1,9 +1,9 @@
 {
   "test": "Hallo {{name}}",
   "common": {
+    "404": "Etwas ist schiefgelaufen, versuche es später erneut.",
     "whiteSpace": " ",
-    "error": "FEHLER",
-    "404": "Etwas ist schiefgelaufen, versuche es später erneut."
+    "error": "FEHLER"
   },
   "middleware": {
     "notAdmin": "Du bist kein Admin."
@@ -58,7 +58,13 @@
     "wrongPassword": "Passwort stimmt nicht überein.",
     "loggedIn": "Benutzer eingeloggt.",
     "providerNotFound": "Provider nicht gefunden.",
-    "noReason": "Kein Grund angegeben."
+    "noReason": "Kein Grund angegeben.",
+    "name": "Name",
+    "emailAddress": "E-Mail-Adresse",
+    "password": "Passwort",
+    "confirmPassword": "Passwort bestätigen",
+    "forgotPassword": "Passwort vergessen?",
+    "orContinueWith": "Oder weiter mit"
   },
   "settings": {
     "changeAvatar": "Avatar ändern",
@@ -81,7 +87,8 @@
     "noChangesMade": "Keine Änderungen vorgenommen",
     "sizeToLarge": "Maximale Uploadgröße ist 4~5 MB, wähle ein kleineres Bild!!",
     "loadingImg": "Foto wird geladen",
-    "imgLoaded": "Foto wurde geladen"
+    "imgLoaded": "Foto wurde geladen",
+    "name": "Name"
   },
   "docs": {
     "documentation": "Dokumentation",
@@ -153,6 +160,52 @@
     "failedToLoadDocumentation": "Dokumentation konnte nicht geladen werden.",
     "emptyResponseBody": "Leerer Antwortinhalt",
     "emptyErrorResponseBody": "Leerer Fehler-Antwortinhalt",
-    "invalidJsonResponse": "Antwort war kein gültiges JSON"
+    "invalidJsonResponse": "Antwort war kein gültiges JSON",
+    "apisSmall": "APIS",
+    "syncsSmall": "SYNCS",
+    "doc": "DOKUM",
+    "syncSmall": "SYNC"
+  },
+  "admin": {
+    "title": "Admin"
+  },
+  "confirm": {
+    "type": "Tippen Sie ",
+    "toConfirm": " zur Bestätigung:",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen"
+  },
+  "dashboard": {
+    "title": "Dashboard"
+  },
+  "errorPage": {
+    "goBack": "← Zurück",
+    "home": "Startseite",
+    "developerDetails": "Entwickler-Details"
+  },
+  "examples": {
+    "title": "LuckyStack Beispiele",
+    "subtitle": "Interaktive Demo aller Framework-Funktionen",
+    "docs": "Dokumentation",
+    "userInfo": "Benutzerinfo",
+    "logout": "Abmelden",
+    "notLoggedIn": "Nicht eingeloggt",
+    "goToLogin": "Zum Login gehen",
+    "realTimeSync": "Echtzeit-Synchronisation",
+    "openTabs": "Zum Testen in 2 Tabs öffnen",
+    "publicApi": "Öffentliche API",
+    "noLoginNeeded": "Kein Login erforderlich",
+    "callApi": "API aufrufen",
+    "toggleAdmin": "Admin umschalten",
+    "requiresLogin": "Login erforderlich",
+    "toggle": "Umschalten",
+    "adminOnly": "Nur für Admins",
+    "adminTrueRequired": "admin: true erforderlich",
+    "apiResults": "API-Ergebnisse",
+    "apiResultsDesc": "Klicken Sie auf eine API-Schaltfläche, um hier Ergebnisse zu sehen"
+  },
+  "template": {
+    "logout": "Abmelden",
+    "socketStatus": "Socket-Status:"
   }
 }

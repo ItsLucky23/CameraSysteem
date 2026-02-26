@@ -1,9 +1,9 @@
 {
   "test": "Bonjour {{name}}",
   "common": {
+    "404": "Un problème est survenu, réessayez plus tard.",
     "whiteSpace": " ",
-    "error": "ERREUR",
-    "404": "Un problème est survenu, réessayez plus tard."
+    "error": "ERREUR"
   },
   "middleware": {
     "notAdmin": "Vous n'êtes pas administrateur."
@@ -58,9 +58,14 @@
     "wrongPassword": "Le mot de passe est incorrect.",
     "loggedIn": "Utilisateur connecté.",
     "providerNotFound": "Fournisseur introuvable.",
-    "noReason": "Aucune raison fournie."
+    "noReason": "Aucune raison fournie.",
+    "name": "Nom",
+    "emailAddress": "Adresse e-mail",
+    "password": "Mot de passe",
+    "confirmPassword": "Confirmer le mot de passe",
+    "forgotPassword": "Mot de passe oublié ?",
+    "orContinueWith": "Ou continuer avec"
   },
-  
   "settings": {
     "changeAvatar": "Changer d'avatar",
     "changeAvatarDescription": "JPG, GIF ou PNG. Max 4 Mo.",
@@ -82,7 +87,8 @@
     "noChangesMade": "Aucun changement effectué",
     "sizeToLarge": "La taille maximale est de 4~5 Mo, choisissez une image plus petite !!",
     "loadingImg": "La photo est en cours de chargement",
-    "imgLoaded": "La photo a été chargée"
+    "imgLoaded": "La photo a été chargée",
+    "name": "Nom"
   },
   "docs": {
     "documentation": "Documentation",
@@ -154,6 +160,52 @@
     "failedToLoadDocumentation": "Échec du chargement de la documentation.",
     "emptyResponseBody": "Corps de réponse vide",
     "emptyErrorResponseBody": "Corps de réponse d'erreur vide",
-    "invalidJsonResponse": "La réponse n'était pas un JSON valide"
+    "invalidJsonResponse": "La réponse n'était pas un JSON valide",
+    "apisSmall": "APIS",
+    "syncsSmall": "SYNCS",
+    "doc": "DOC",
+    "syncSmall": "SYNC"
+  },
+  "admin": {
+    "title": "Admin"
+  },
+  "confirm": {
+    "type": "Tapez ",
+    "toConfirm": " pour confirmer :",
+    "cancel": "Annuler",
+    "confirm": "Confirmer"
+  },
+  "dashboard": {
+    "title": "Tableau de bord"
+  },
+  "errorPage": {
+    "goBack": "← Retour",
+    "home": "Accueil",
+    "developerDetails": "Détails du développeur"
+  },
+  "examples": {
+    "title": "Exemples LuckyStack",
+    "subtitle": "Démo interactive de toutes les fonctionnalités",
+    "docs": "Documentation",
+    "userInfo": "Info Utilisateur",
+    "logout": "Se déconnecter",
+    "notLoggedIn": "Non connecté",
+    "goToLogin": "Aller à la connexion",
+    "realTimeSync": "Synchronisation en temps réel",
+    "openTabs": "Ouvrir dans 2 onglets pour tester",
+    "publicApi": "API publique",
+    "noLoginNeeded": "Aucune connexion requise",
+    "callApi": "Appeler API",
+    "toggleAdmin": "Basculer Admin",
+    "requiresLogin": "Connexion requise",
+    "toggle": "Basculer",
+    "adminOnly": "Admin uniquement",
+    "adminTrueRequired": "admin: true requis",
+    "apiResults": "Résultats API",
+    "apiResultsDesc": "Cliquez sur un bouton API pour voir les résultats ici"
+  },
+  "template": {
+    "logout": "Se déconnecter",
+    "socketStatus": "État du Socket :"
   }
 }

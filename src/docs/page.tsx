@@ -762,7 +762,7 @@ export default function DocsPage() {
           {/* APIs section */}
           <div>
             <div className="flex items-center gap-2 px-2 mb-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-primary">APIs</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-primary">{translate({ key: 'docs.apisSmall' })}</span>
               <div className="flex-1 h-px bg-primary/20" />
             </div>
             {Object.entries(docs.apis).map(([page, apis]) => (
@@ -801,7 +801,7 @@ export default function DocsPage() {
           {/* Syncs section */}
           <div>
             <div className="flex items-center gap-2 px-2 mb-2">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-secondary">Syncs</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-secondary">{translate({ key: 'docs.syncsSmall' })}</span>
               <div className="flex-1 h-px bg-secondary/20" />
             </div>
             {Object.entries(docs.syncs).map(([page, syncs]) => (
@@ -843,7 +843,7 @@ export default function DocsPage() {
       <div className="flex-1 overflow-y-auto bg-background">
         {!selectedPath && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-common/40 select-none">
-            <div className="text-5xl">DOC</div>
+            <div className="text-5xl">{translate({ key: 'docs.doc' })}</div>
             <div className="text-sm font-medium">{translate({ key: 'docs.selectApiOrSync' })}</div>
           </div>
         )}
@@ -876,7 +876,7 @@ export default function DocsPage() {
                 <div className="flex items-center gap-2 pt-0.5">
                   <span className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadgeClass(status)}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${statusDotClass(status)}`} />
-                    {translate({ key: 'docs.status' })}: {status}
+                    {translate({ key: 'docs.status' })} {status}
                   </span>
                 </div>
               </div>
@@ -963,7 +963,7 @@ export default function DocsPage() {
             {/* Header card */}
             <div className="bg-container1 border border-container1-border rounded-xl px-6 py-5 flex flex-col gap-1.5">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full shrink-0 bg-secondary text-title-secondary">SYNC</span>
+                <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full shrink-0 bg-secondary text-title-secondary">{translate({ key: 'docs.syncSmall' })}</span>
                 <h1 className="text-xl font-bold text-title">{selectedSync.name}</h1>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">

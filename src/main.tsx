@@ -8,6 +8,7 @@ import VConsole from 'vconsole'
 
 import { mobileConsole } from 'config'
 import LocationProvider from 'src/_components/LocationProvider'
+import enJson from "src/_locales/en.json"
 
 import { AvatarProvider } from './_components/AvatarProvider'
 import ErrorPage from './_components/ErrorPage';
@@ -110,19 +111,24 @@ const router = createBrowserRouter([{
 
 if (mobileConsole) { new VConsole(); }
 
-// Error fallback component for Sentry ErrorBoundary
-const ErrorFallback = () => (
-  <div className="w-full h-screen flex flex-col items-center justify-center bg-background text-foreground">
-    <h1 className="text-2xl font-bold mb-4">Something went wrong</h1>
-    <p className="text-muted-foreground mb-4">An unexpected error occurred. Please refresh the page.</p>
-    <button
-      onClick={() => { globalThis.location.reload(); }}
-      className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90"
-    >
-      Refresh Page
-    </button>
-  </div>
-);
+const ErrorFallback = () => {
+  const title = enJson.common['404'];
+  const message = enJson.api.internalServerError;
+  const btnText = "Refresh Page";
+
+  return (
+    <div className="w-full h-screen flex flex-col items-center justify-center bg-background text-foreground">
+      <h1 className="text-2xl font-bold mb-4">{title}</h1>
+      <p className="text-muted-foreground mb-4">{message}</p>
+      <button
+        onClick={() => { globalThis.location.reload(); }}
+        className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:opacity-90"
+      >
+        {btnText}
+      </button>
+    </div>
+  );
+};
 
 const root = document.querySelector("#root");
 if (root) {

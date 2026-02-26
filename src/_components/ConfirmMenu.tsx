@@ -2,6 +2,7 @@
 import { ReactNode, useState } from 'react';
 
 import { menuHandler } from 'src/_functions/menuHandler';
+import { useTranslator } from 'src/_functions/translator';
 
 interface ConfirmMenuProps {
   title: string;
@@ -11,6 +12,7 @@ interface ConfirmMenuProps {
 }
 
 export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps) {
+  const translate = useTranslator();
   const [inputValue, setInputValue] = useState('');
 
   const handleConfirm = () => {
@@ -39,7 +41,7 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
       {input && (
         <div className="flex flex-col gap-1">
           <label className="text-sm text-common/80">
-            Type <span className="font-mono bg-container2 px-1">{input}</span> to confirm:
+            {translate({ key: 'confirm.type' })} <span className="font-mono bg-container2 px-1">{input}</span> {translate({ key: 'confirm.toConfirm' })}
           </label>
           <input
             type="text"
@@ -55,7 +57,7 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
           onClick={handleCancel}
           className="px-4 py-2 rounded bg-container2 hover:bg-container2-hover text-common text-sm font-semibold border border-container2-border"
         >
-          Cancel
+          {translate({ key: 'confirm.cancel' })}
         </button>
         <button
           onClick={handleConfirm}
@@ -66,7 +68,7 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
               : 'bg-primary hover:bg-primary-hover cursor-pointer'
             }`}
         >
-          Confirm
+          {translate({ key: 'confirm.confirm' })}
         </button>
       </div>
     </div>

@@ -67,6 +67,8 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
         ? '-100% 0'
         : '100% 0'); // initial
 
+  const isVisible = !isClosing;
+
   return (
     <div
       className={`w-full overflow-hidden absolute flex flex-col text-black transition-all duration-200 origin-center
@@ -186,7 +188,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
     const lastChild = document.querySelector('#MENUHANDLER')?.lastElementChild;
     if (lastChild) {
       const maxHeight = window.innerHeight * 0.9;
-      const height = lastChild.clientHeight > maxHeight ? maxHeight : lastChild.clientHeight;
+      const height = Math.min(lastChild.clientHeight, maxHeight);
       setLastChildHeight(height);
     } else {
       setLastChildHeight(0);

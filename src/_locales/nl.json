@@ -1,9 +1,9 @@
 {
   "test": "Hallo {{name}}",
   "common": {
+    "404": "Er is iets misgegaan, probeer het later opnieuw.",
     "whiteSpace": " ",
-    "error": "FOUT",
-    "404": "Er is iets misgegaan, probeer het later opnieuw."
+    "error": "FOUT"
   },
   "middleware": {
     "notAdmin": "Je bent geen admin."
@@ -58,7 +58,13 @@
     "wrongPassword": "Wachtwoord komt niet overeen.",
     "loggedIn": "Gebruiker ingelogd.",
     "providerNotFound": "Provider niet gevonden.",
-    "noReason": "Geen reden opgegeven."
+    "noReason": "Geen reden opgegeven.",
+    "name": "Naam",
+    "emailAddress": "E-mailadres",
+    "password": "Wachtwoord",
+    "confirmPassword": "Wachtwoord bevestigen",
+    "forgotPassword": "Wachtwoord vergeten?",
+    "orContinueWith": "Of ga verder met"
   },
   "settings": {
     "changeAvatar": "Verander avatar",
@@ -81,7 +87,8 @@
     "noChangesMade": "Geen wijzigingen gemaakt",
     "sizeToLarge": "Maximale uploadgrootte is 4~5 MB, kies een kleinere afbeelding!!",
     "loadingImg": "Foto word geladen",
-    "imgLoaded": "Foto is geladen"
+    "imgLoaded": "Foto is geladen",
+    "name": "Naam"
   },
   "docs": {
     "documentation": "Documentatie",
@@ -153,6 +160,52 @@
     "failedToLoadDocumentation": "Documentatie laden mislukt.",
     "emptyResponseBody": "Lege response body",
     "emptyErrorResponseBody": "Lege error response body",
-    "invalidJsonResponse": "Response is geen geldige JSON"
+    "invalidJsonResponse": "Response is geen geldige JSON",
+    "apisSmall": "APIS",
+    "syncsSmall": "SYNCS",
+    "doc": "DOC",
+    "syncSmall": "SYNC"
+  },
+  "admin": {
+    "title": "Admin"
+  },
+  "confirm": {
+    "type": "Typ ",
+    "toConfirm": " om te bevestigen:",
+    "cancel": "Annuleer",
+    "confirm": "Bevestig"
+  },
+  "dashboard": {
+    "title": "Dashboard"
+  },
+  "errorPage": {
+    "goBack": "← Ga terug",
+    "home": "Home",
+    "developerDetails": "Ontwikkelaarsgegevens"
+  },
+  "examples": {
+    "title": "LuckyStack Voorbeelden",
+    "subtitle": "Interactieve demo van alle framework-functies",
+    "docs": "Documentatie",
+    "userInfo": "Gebruikersinfo",
+    "logout": "Uitloggen",
+    "notLoggedIn": "Niet ingelogd",
+    "goToLogin": "Ga naar inloggen",
+    "realTimeSync": "Real-time Sync",
+    "openTabs": "Open in 2 tabbladen om te testen",
+    "publicApi": "Openbare API",
+    "noLoginNeeded": "Geen login nodig",
+    "callApi": "API aanroepen",
+    "toggleAdmin": "Admin in/uitschakelen",
+    "requiresLogin": "Inloggen verplicht",
+    "toggle": "In/uitschakelen",
+    "adminOnly": "Alleen voor admins",
+    "adminTrueRequired": "admin: true verplicht",
+    "apiResults": "API Resultaten",
+    "apiResultsDesc": "Klik op een API-knop om de resultaten hier te zien"
+  },
+  "template": {
+    "logout": "Uitloggen",
+    "socketStatus": "Socket status:"
   }
 }

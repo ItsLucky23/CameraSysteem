@@ -7,6 +7,7 @@ import reactX from 'eslint-plugin-react-x'
 import eslintPluginUnicorn from 'eslint-plugin-unicorn'
 import eslintPluginImportX from 'eslint-plugin-import-x'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
+import react from 'eslint-plugin-react'
 
 export default tseslint.config(
   { ignores: ['dist'] },
@@ -42,6 +43,7 @@ export default tseslint.config(
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
+      'react': react,
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
@@ -80,6 +82,12 @@ export default tseslint.config(
           },
         },
       ],
+      'import-x/order': 'off',
+      "react/jsx-no-literals": ["error", { 
+        "noStrings": true,
+        "allowedStrings": ["!", "?"],
+        "ignoreProps": true 
+      }]
     },
   },
   {
@@ -95,4 +103,3 @@ export default tseslint.config(
   }
 )
 //npx eslint src/**/*.tsx
-// ctrl + shift + p -> Restart TS server

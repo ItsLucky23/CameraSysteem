@@ -5,11 +5,15 @@ import { useSession } from "src/_providers/SessionProvider";
 import { apiRequest } from "src/_sockets/apiRequest";
 import { joinRoom } from "src/_sockets/socketInitializer";
 import { syncRequest, useSyncEvents } from "src/_sockets/syncRequest";
+import { useTranslator } from "src/_functions/translator";
 
 export const template = 'home';
 
 export default function ExamplesPage() {
   const { session } = useSession();
+  const translate = useTranslator();
+  const btnMinus = "−";
+  const btnPlus = "+";
   const [counter, setCounter] = useState(0);
   const [apiResults, setApiResults] = useState<{ APINAME: string; result: unknown; ts: string }[]>([]);
 
@@ -39,11 +43,11 @@ export default function ExamplesPage() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex flex-col gap-1">
-            <h1 className="text-3xl font-bold text-title">LuckyStack Examples</h1>
-            <p className="text-muted text-sm">Interactive demo of all framework features</p>
+            <h1 className="text-3xl font-bold text-title">{translate({ key: 'examples.title' })}</h1>
+            <p className="text-muted text-sm">{translate({ key: 'examples.subtitle' })}</p>
           </div>
           <Link to="/docs" className="px-4 h-9 bg-container1 border border-container1-border text-commen rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300">
-            Docs
+            {translate({ key: 'examples.docs' })}
           </Link>
         </div>
 
@@ -54,7 +58,7 @@ export default function ExamplesPage() {
           <div className="md:row-span-2 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-4">
             <h2 className="font-semibold text-title flex items-center gap-2">
               <span className="w-6 h-6 bg-primary rounded flex items-center justify-center text-white text-xs"></span>
-              User Info
+              {translate({ key: 'examples.userInfo' })}
             </h2>
             {session?.id ? (
               <div className="flex flex-col gap-3 flex-1">
@@ -72,14 +76,14 @@ export default function ExamplesPage() {
                   onClick={() => void apiRequest({ name: 'logout', version: 'v1' }) }
                   className="mt-auto px-4 h-9 bg-container12 border border-container2-border text-commen rounded-md hover:bg-container12-hover transition-colors text-sm"
                 >
-                  Logout
+                  {translate({ key: 'examples.logout' })}
                 </button>
               </div>
             ) : (
               <div className="flex flex-col gap-3 flex-1 items-center justify-center">
-                <p className="text-muted text-sm">Not logged in</p>
+                <p className="text-muted text-sm">{translate({ key: 'examples.notLoggedIn' })}</p>
                 <Link to="/login" className="px-4 h-9 bg-primary text-white rounded-md flex items-center justify-center hover:scale-105 transition-all duration-300 text-sm">
-                  Go to Login
+                  {translate({ key: 'examples.goToLogin' })}
                 </Link>
               </div>
             )}
@@ -90,29 +94,29 @@ export default function ExamplesPage() {
             <div className="flex items-center justify-between">
               <h2 className="font-semibold text-title flex items-center gap-2">
                 <span className="w-6 h-6 bg-orange-500 rounded flex items-center justify-center text-white text-xs"></span>
-                Real-time Sync
+                {translate({ key: 'examples.realTimeSync' })}
               </h2>
-              <span className="text-xs text-muted">Open in 2 tabs to test</span>
+              <span className="text-xs text-muted">{translate({ key: 'examples.openTabs' })}</span>
             </div>
             <div className="flex items-center gap-6 justify-center py-4">
               <button
                 onClick={() => { void syncRequest({ name: 'examples/updateCounter', version: 'v1', data: { increase: false }, receiver: 'examples-room' }); }}
                 className="w-14 h-14 bg-wrong text-white rounded-full text-3xl font-bold hover:scale-110 transition-transform cursor-pointer"
-              >−</button>
+              >{btnMinus}</button>
               <div className="w-28 h-20 bg-container12 border border-container2-border rounded-lg flex items-center justify-center">
                 <span className="text-4xl font-bold text-title">{counter}</span>
               </div>
               <button
                 onClick={() => { void syncRequest({ name: 'examples/updateCounter', version: 'v1', data: { increase: true }, receiver: 'examples-room' }); }}
                 className="w-14 h-14 bg-correct text-white rounded-full text-3xl font-bold hover:scale-110 transition-transform cursor-pointer"
-              >+</button>
+              >{btnPlus}</button>
             </div>
           </div>
 
           {/* Public API */}
           <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">Public API</h3>
-            <p className="text-xs text-muted">No login needed</p>
+            <h3 className="font-semibold text-title text-sm">{translate({ key: 'examples.publicApi' })}</h3>
+            <p className="text-xs text-muted">{translate({ key: 'examples.noLoginNeeded' })}</p>
             <button
               onClick={() => {
                 void (async () => {
@@ -122,14 +126,14 @@ export default function ExamplesPage() {
               }}
               className="mt-auto px-4 h-9 bg-correct text-white rounded-md hover:bg-correct-hover transition-colors text-sm cursor-pointer"
             >
-              Call API
+              {translate({ key: 'examples.callApi' })}
             </button>
           </div>
 
           {/* Toggle Admin */}
           <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">Toggle Admin</h3>
-            <p className="text-xs text-muted">Requires login</p>
+            <h3 className="font-semibold text-title text-sm">{translate({ key: 'examples.toggleAdmin' })}</h3>
+            <p className="text-xs text-muted">{translate({ key: 'examples.requiresLogin' })}</p>
             <button
               onClick={() => {
                 void (async () => {
@@ -139,14 +143,14 @@ export default function ExamplesPage() {
               }}
               className="mt-auto px-4 h-9 bg-orange-500 text-white rounded-md hover:bg-orange-600 transition-colors text-sm cursor-pointer"
             >
-              Toggle
+              {translate({ key: 'examples.toggle' })}
             </button>
           </div>
 
           {/* Admin Only */}
           <div className="bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">Admin Only</h3>
-            <p className="text-xs text-muted">admin: true required</p>
+            <h3 className="font-semibold text-title text-sm">{translate({ key: 'examples.adminOnly' })}</h3>
+            <p className="text-xs text-muted">{translate({ key: 'examples.adminTrueRequired' })}</p>
             <button
               onClick={() => {
                 void (async () => {
@@ -156,15 +160,15 @@ export default function ExamplesPage() {
               }}
               className="mt-auto px-4 h-9 bg-wrong text-white rounded-md hover:bg-wrong-hover transition-colors text-sm cursor-pointer"
             >
-              Call API
+              {translate({ key: 'examples.callApi' })}
             </button>
           </div>
 
           {/* API Results - Full Width */}
           <div className="md:col-span-3 lg:col-span-4 bg-container1 border border-container1-border rounded-lg p-5 flex flex-col gap-3">
-            <h3 className="font-semibold text-title text-sm">API Results</h3>
+            <h3 className="font-semibold text-title text-sm">{translate({ key: 'examples.apiResults' })}</h3>
             {apiResults.length === 0 ? (
-              <p className="text-xs text-muted">Click an API button to see results here</p>
+              <p className="text-xs text-muted">{translate({ key: 'examples.apiResultsDesc' })}</p>
             ) : (
               <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
                 {apiResults.map((item) => (

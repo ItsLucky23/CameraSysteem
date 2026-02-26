@@ -128,7 +128,7 @@ export default function Home() {
         </div>
 
         <div className="space-y-2 w-full">
-          <div className="text-lg font-semibold">Name</div>
+          <div className="text-lg font-semibold">{translate({ key: 'settings.name' })}</div>
           <input
             className={`w-full bg-container2 border-container2-border border-2 focus:outline-0 focus:border-secondary transition-all duration-150 p-2 rounded-md`}
             value={newName}

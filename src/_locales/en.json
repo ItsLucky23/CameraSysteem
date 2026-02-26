@@ -1,9 +1,9 @@
 {
   "test": "Hallo {{name}}",
   "common": {
+    "404": "Something went wrong, try again later.",
     "whiteSpace": " ",
-    "error": "ERROR",
-    "404": "Something went wrong, try again later."
+    "error": "ERROR"
   },
   "middleware": {
     "notAdmin": "You are not an admin."
@@ -58,7 +58,13 @@
     "wrongPassword": "Password does not match.",
     "loggedIn": "User logged in.",
     "providerNotFound": "Provider not found.",
-    "noReason": "No reason provided."
+    "noReason": "No reason provided.",
+    "name": "Name",
+    "emailAddress": "Email address",
+    "password": "Password",
+    "confirmPassword": "Confirm password",
+    "forgotPassword": "Forgot Password? ",
+    "orContinueWith": "Or continue with"
   },
   "settings": {
     "changeAvatar": "Change avatar",
@@ -82,7 +88,8 @@
     "noChangesMade": "No changes made",
     "sizeToLarge": "Max upload size is 4~5 MB, chose a smaller img!!",
     "loadingImg": "Photo is loading",
-    "imgLoaded": "Photo has loaded"
+    "imgLoaded": "Photo has loaded",
+    "name": "Name"
   },
   "docs": {
     "documentation": "Documentation",
@@ -154,6 +161,52 @@
     "failedToLoadDocumentation": "Failed to load documentation.",
     "emptyResponseBody": "Empty response body",
     "emptyErrorResponseBody": "Empty error response body",
-    "invalidJsonResponse": "Response was not valid JSON"
+    "invalidJsonResponse": "Response was not valid JSON",
+    "apisSmall": "APIs",
+    "syncsSmall": "Syncs",
+    "doc": "DOC",
+    "syncSmall": "SYNC"
+  },
+  "admin": {
+    "title": "Admin"
+  },
+  "confirm": {
+    "type": "Type ",
+    "toConfirm": " to confirm:",
+    "cancel": "Cancel",
+    "confirm": "Confirm"
+  },
+  "dashboard": {
+    "title": "Dashboard"
+  },
+  "errorPage": {
+    "goBack": "← Go Back",
+    "home": "Home",
+    "developerDetails": "Developer Details"
+  },
+  "examples": {
+    "title": "LuckyStack Examples",
+    "subtitle": "Interactive demo of all framework features",
+    "docs": "Docs",
+    "userInfo": "User Info",
+    "logout": "Logout",
+    "notLoggedIn": "Not logged in",
+    "goToLogin": "Go to Login",
+    "realTimeSync": "Real-time Sync",
+    "openTabs": "Open in 2 tabs to test",
+    "publicApi": "Public API",
+    "noLoginNeeded": "No login needed",
+    "callApi": "Call API",
+    "toggleAdmin": "Toggle Admin",
+    "requiresLogin": "Requires login",
+    "toggle": "Toggle",
+    "adminOnly": "Admin Only",
+    "adminTrueRequired": "admin: true required",
+    "apiResults": "API Results",
+    "apiResultsDesc": "Click an API button to see results here"
+  },
+  "template": {
+    "logout": "Logout",
+    "socketStatus": "Socket status:"
   }
 }

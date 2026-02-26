@@ -5,9 +5,11 @@ import { backendUrl, loginRedirectUrl, loginPageUrl, providers, SessionLayout } 
 import tryCatch from "shared/tryCatch";
 
 import notify from "../_functions/notify";
+import { useTranslator } from "../_functions/translator";
 const env = import.meta.env;
 
 export default function LoginForm({ formType }: { formType: "login" | "register" }) {
+  const translate = useTranslator();
   const isLogin = formType === "login";
   const title = isLogin ? "Sign in to your account" : "Create a new account";
   const subtitleText = isLogin ? "Don't have an account yet? " : "Already have an account? ";
@@ -107,7 +109,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
             <div className="flex flex-col gap-4">
               {!isLogin && (
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="name" className="font-medium text-sm">Name</label>
+                  <label htmlFor="name" className="font-medium text-sm">{translate({ key: 'login.name' })}</label>
                   <input
                     id="name"
                     name="name"
@@ -118,7 +120,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 </div>
               )}
               <div className="flex flex-col gap-2">
-                <label htmlFor="email" className="font-medium text-sm">Email address</label>
+                <label htmlFor="email" className="font-medium text-sm">{translate({ key: 'login.emailAddress' })}</label>
                 <input
                   id="email"
                   name="email"
@@ -128,7 +130,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label htmlFor="password" className="font-medium text-sm">Password</label>
+                <label htmlFor="password" className="font-medium text-sm">{translate({ key: 'login.password' })}</label>
                 <input
                   id="password"
                   name="password"
@@ -139,7 +141,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               </div>
               {!isLogin && (
                 <div className="flex flex-col gap-2">
-                  <label htmlFor="confirmPassword" className="font-medium text-sm">Confirm password</label>
+                  <label htmlFor="confirmPassword" className="font-medium text-sm">{translate({ key: 'login.confirmPassword' })}</label>
                   <input
                     id="confirmPassword"
                     name="confirmPassword"
@@ -153,7 +155,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
               <div className="flex items-center justify-center">
                 {isLogin && (
                   <button type="button" className="px-8 h-10 cursor-pointer rounded-md text-primary hover:scale-105 transition-all duration-300">
-                    Forgot Password?
+                    {translate({ key: 'login.forgotPassword' })}
                   </button>
                 )}
               </div>
@@ -169,7 +171,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
             </div>
 
             <div className="flex items-center w-full text-gray-500 text-sm before:flex-1 before:border-t before:border-container1-border before:content-[''] after:flex-1 after:border-t after:border-container1-border after:content-['']">
-              <span className="px-4 bg-container1 text-title">Or continue with</span>
+              <span className="px-4 bg-container1 text-title">{translate({ key: 'login.orContinueWith' })}</span>
             </div>
           </>
         )}

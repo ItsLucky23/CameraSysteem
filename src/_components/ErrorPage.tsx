@@ -6,8 +6,10 @@
  */
 
 import { useRouteError, isRouteErrorResponse, Link } from 'react-router-dom';
+import { useTranslator } from 'src/_functions/translator';
 
 export default function ErrorPage() {
+  const translate = useTranslator();
   const error = useRouteError();
 
   // Determine error type and message
@@ -64,13 +66,13 @@ export default function ErrorPage() {
           onClick={() => { globalThis.history.back(); }}
           className="px-6 py-3 bg-container1 text-common border border-container1-border rounded-lg hover:bg-container1-hover transition-colors font-medium"
         >
-          ← Go Back
+          {translate({ key: 'errorPage.goBack' })}
         </button>
         <Link
           to="/"
           className="px-6 py-3 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors font-medium"
         >
-          Home
+          {translate({ key: 'errorPage.home' })}
         </Link>
       </div>
 
@@ -79,7 +81,7 @@ export default function ErrorPage() {
         <div className="mt-12 max-w-2xl w-full">
           <details className="bg-container1 rounded-lg p-4 border border-container1-border">
             <summary className="cursor-pointer text-sm text-muted font-medium">
-              Developer Details
+              {translate({ key: 'errorPage.developerDetails' })}
             </summary>
             <pre className="mt-4 text-xs text-wrong overflow-auto p-4 bg-container2 rounded border border-container2-border">
               {error.stack}

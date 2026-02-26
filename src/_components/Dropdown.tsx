@@ -52,6 +52,14 @@ export default function Dropdown({
   return (
     <div
       ref={dropdownRef}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setIsOpen((prev) => !prev);
+        }
+      }}
       className={`
         dropdown
         relative flex items-center justify-between gap-3 
