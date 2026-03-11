@@ -1,0 +1,68 @@
+services:
+  client:
+    image: node:22
+    working_dir: /srv/app
+    volumes:
+      - .:/srv/app
+      - /srv/app/node_modules
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+    command: >
+      sh -c "[ -f node_modules/.bin/tsx ] || npm install &&
+             npm run client"
+
+  server:
+    image: node:22
+    working_dir: /srv/app
+    volumes:
+      - .:/srv/app
+      - /srv/app/node_modules
+    ports:
+      - "80:80"
+    env_file:
+      - .env
+    environment:
+      SERVER_IP: "0.0.0.0"
+      DATABASE_URL: "mongodb://root:password@mongodb:27017/luckystack?authSource=admin&directConnection=true"
+      REDIS_HOST: "redis"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    command: >
+      sh -c "[ -f node_modules/.bin/tsx ] || npm install &&
+             npx prisma generate &&
+             npx prisma db push &&
+             npm run server"
+
+  mongodb:
+    image: bitnami/mongodb:latest
+    ports:
+      - "27017:27017"
+    environment:
+      MONGODB_ROOT_USER: root
+      MONGODB_ROOT_PASSWORD: password
+      MONGODB_REPLICA_SET_MODE: primary
+      MONGODB_REPLICA_SET_NAME: rs0
+      MONGODB_REPLICA_SET_KEY: replicasetkey
+      MONGODB_ADVERTISED_HOSTNAME: mongodb
+    volumes:
+      - mongodb_data:/bitnami/mongodb
+    healthcheck:
+      test: ["CMD", "mongosh", "--host", "localhost:27017", "-u", "root", "-p", "password",
+             "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok",
+             "--quiet"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    ports:
+      - "6379:6379"
+
+volumes:
+  mongodb_data:

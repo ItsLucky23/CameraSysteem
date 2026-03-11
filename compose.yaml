@@ -1,0 +1,9 @@
+services:
+  client:
+    image: ${IMAGES_PREFIX:-}app-client
+  server:
+    image: ${IMAGES_PREFIX:-}app-server
+  mongodb:
+    image: mongo:8
+  redis:
+    image: redis:7-alpine

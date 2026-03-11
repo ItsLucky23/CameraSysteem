@@ -39,9 +39,7 @@ LuckyStack is a custom full-stack framework that takes a **socket-first approach
 
 ### Prerequisites
 
-- Node.js 18+
-- Redis 6+
-- MongoDB (local or Atlas)
+- Docker + Docker Compose
 
 ### Installation
 
@@ -50,24 +48,17 @@ LuckyStack is a custom full-stack framework that takes a **socket-first approach
 git clone https://github.com/ItsLucky23/LuckyStack-v2 PROJECT_NAME
 cd PROJECT_NAME
 
-# Install dependencies
-npm install
-
-# Install Sentry packages (optional but recommended)
-npm install @sentry/node @sentry/react
-
 # Copy environment template
 cp envTemplate.txt .env
 cp configTemplate.txt config.ts
 
-# Initialize database
-npx prisma generate
-npx prisma db push
-
-# Start development servers
-npm run server   # Backend (Terminal 1)
-npm run client   # Frontend (Terminal 2)
+# Start all services (client, server, MongoDB, Redis)
+docker compose up
 ```
+
+MongoDB and Redis are included in the Docker setup — no separate installation needed.
+
+> **Without Docker:** Install Node.js 18+, Redis 6+, and MongoDB manually, then run `npm install && npm run server` / `npm run client`.
 
 ### Access the App
 
@@ -165,12 +156,15 @@ await syncRequest({
 
 ## Scripts
 
-| Command          | Description           |
-| ---------------- | --------------------- |
-| `npm run client` | Start Vite dev server |
-| `npm run server` | Start Node.js server  |
-| `npm run build`  | Build for production  |
-| `npm run prod`   | Run production server |
+| Command                  | Description                          |
+| ------------------------ | ------------------------------------ |
+| `docker compose up`      | Start all services (recommended)     |
+| `docker compose up -d`   | Start all services in the background |
+| `docker compose down`    | Stop all services                    |
+| `npm run client`         | Start Vite dev server (no Docker)    |
+| `npm run server`         | Start Node.js server (no Docker)     |
+| `npm run build`          | Build for production                 |
+| `npm run prod`           | Run production server                |
 
 ---
 

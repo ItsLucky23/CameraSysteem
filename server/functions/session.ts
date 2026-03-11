@@ -1,6 +1,6 @@
 /**
  * Session management utilities for Redis-backed user sessions.
- * 
+ *
  * Features:
  * - Save/retrieve/delete sessions from Redis
  * - Configurable session expiry (config.sessionExpiryDays)
@@ -19,7 +19,7 @@ const SESSION_TTL = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
 
 /**
  * Save or update a user session in Redis.
- * 
+ *
  * @param token - The session token (unique identifier)
  * @param data - The session data to store
  * @param newUser - If true, this is a new login (triggers single-session enforcement)
@@ -49,6 +49,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
 
       const activeUsersKey = `${process.env.PROJECT_NAME}-activeUsers:${userId}`;
       // const previousTokens = await redis.smembers(activeUsersKey);
+
       const allTokens = await redis.smembers(activeUsersKey);
       // Exclude the current token — it was just added and has no socket room yet
       const previousTokens = allTokens.filter(t => t !== token);
@@ -88,7 +89,7 @@ const saveSession = async (token: string, data: SessionLayout, newUser?: boolean
 
 /**
  * Retrieve a user session from Redis.
- * 
+ *
  * @param token - The session token
  * @returns The session data or null if not found
  */
@@ -112,7 +113,7 @@ const getSession = async (token: string | null): Promise<SessionLayout | null> =
 
 /**
  * Delete a user session from Redis and notify connected clients.
- * 
+ *
  * @param token - The session token to delete
  * @returns true if successful
  */
@@ -146,7 +147,7 @@ const deleteSession = async (token: string): Promise<boolean> => {
 
 /**
  * Get all active sessions (admin utility).
- * 
+ *
  * @returns Array of all session data
  */
 const getAllSessions = async (): Promise<SessionLayout[]> => {
