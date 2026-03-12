@@ -1,5 +1,7 @@
 import ts from 'typescript';
-import { getServerProgram, expandType } from './tsProgram';
+import { getServerProgram, expandType, expandTypeDetailed, ExpandedTypeResult } from './tsProgram';
+
+export interface TypeExtractionResult extends ExpandedTypeResult {}
 
 // Kept for backwards compatibility — callers outside this module may still import it.
 export const stripComments = (str: string): string => {
@@ -96,108 +98,130 @@ const unionTypes = (types: string[]): string => {
 // ─── public API ──────────────────────────────────────────────────────────────
 
 export const getInputTypeFromFile = (filePath: string): string => {
+  return getInputTypeDetailsFromFile(filePath).text;
+};
+
+export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ }';
 
   try {
     const program = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
-    if (!sourceFile) return DEFAULT;
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const checker = program.getTypeChecker();
     const iface = findInterface(sourceFile, 'ApiParams');
-    if (!iface) return DEFAULT;
+    if (!iface) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const dataType = getInterfacePropertyType(iface, 'data', checker);
-    if (!dataType) return DEFAULT;
+    if (!dataType) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    return expandType(dataType, checker) || DEFAULT;
+    const expanded = expandTypeDetailed(dataType, checker);
+    return { text: expanded.text || DEFAULT, unresolvedSymbols: expanded.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting input type from ${filePath}:`, error);
-    return DEFAULT;
+    return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
 
 export const getOutputTypeFromFile = (filePath: string): string => {
+  return getOutputTypeDetailsFromFile(filePath).text;
+};
+
+export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ status: string }';
 
   try {
     const program = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
-    if (!sourceFile) return DEFAULT;
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
-    if (!mainFn) return DEFAULT;
+    if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const types = collectReturnObjectTypes(mainFn, checker);
-    return unionTypes(types) || DEFAULT;
+    return { text: unionTypes(types) || DEFAULT, unresolvedSymbols: [] };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting output type from ${filePath}:`, error);
-    return DEFAULT;
+    return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
 
 export const getSyncClientDataType = (filePath: string): string => {
+  return getSyncClientDataTypeDetailsFromFile(filePath).text;
+};
+
+export const getSyncClientDataTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ }';
 
   try {
     const program = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
-    if (!sourceFile) return DEFAULT;
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const checker = program.getTypeChecker();
     const iface = findInterface(sourceFile, 'SyncParams');
-    if (!iface) return DEFAULT;
+    if (!iface) return { text: DEFAULT, unresolvedSymbols: [] };
 
     // Try clientInput first, then clientData (legacy name)
     const dataType =
       getInterfacePropertyType(iface, 'clientInput', checker)
       ?? getInterfacePropertyType(iface, 'clientData', checker);
-    if (!dataType) return DEFAULT;
+    if (!dataType) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    return expandType(dataType, checker) || DEFAULT;
+    const expanded = expandTypeDetailed(dataType, checker);
+    return { text: expanded.text || DEFAULT, unresolvedSymbols: expanded.unresolvedSymbols };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync clientData type from ${filePath}:`, error);
-    return DEFAULT;
+    return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
 
 export const getSyncServerOutputType = (filePath: string): string => {
+  return getSyncServerOutputTypeDetailsFromFile(filePath).text;
+};
+
+export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ status: string }';
 
   try {
     const program = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
-    if (!sourceFile) return DEFAULT;
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
-    if (!mainFn) return DEFAULT;
+    if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const types = collectReturnObjectTypes(mainFn, checker);
-    return unionTypes(types) || DEFAULT;
+    return { text: unionTypes(types) || DEFAULT, unresolvedSymbols: [] };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync serverOutput type from ${filePath}:`, error);
-    return DEFAULT;
+    return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };
 
 export const getSyncClientOutputType = (filePath: string): string => {
+  return getSyncClientOutputTypeDetailsFromFile(filePath).text;
+};
+
+export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeExtractionResult => {
   const DEFAULT = '{ }';
 
   try {
     const program = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
-    if (!sourceFile) return DEFAULT;
+    if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
-    if (!mainFn) return DEFAULT;
+    if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
     const types = collectReturnObjectTypes(mainFn, checker);
-    return unionTypes(types) || DEFAULT;
+    return { text: unionTypes(types) || DEFAULT, unresolvedSymbols: [] };
   } catch (error) {
     console.error(`[TypeMapGenerator] Error extracting sync clientOutput type from ${filePath}:`, error);
-    return DEFAULT;
+    return { text: DEFAULT, unresolvedSymbols: [] };
   }
 };

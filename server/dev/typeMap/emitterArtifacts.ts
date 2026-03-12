@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import ts from 'typescript';
 import { GENERATED_API_DOCS_PATH, GENERATED_SOCKET_TYPES_PATH } from '../../utils/paths';
 
 export interface ApiTypeEntry {
@@ -54,6 +55,83 @@ const writeFileIfChanged = (filePath: string, content: string): boolean => {
 
 const indentStr = (str: string, indentText: string): string => {
 	return str.split('\n').map((line, i) => i === 0 ? line : indentText + line).join('\n');
+};
+
+const validateGeneratedTypeIdentifiers = (content: string): void => {
+	const sourceFile = ts.createSourceFile('apiTypes.generated.ts', content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+	const knownSymbols = new Set<string>();
+	const referencedSymbols = new Set<string>();
+
+	const builtIns = new Set([
+		'string', 'number', 'boolean', 'null', 'undefined', 'unknown', 'any', 'never', 'void', 'object', 'bigint', 'symbol',
+		'Record', 'Partial', 'Required', 'Pick', 'Omit', 'Readonly', 'Exclude', 'Extract', 'NonNullable', 'ReturnType',
+		'Awaited', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet', 'Array', 'ReadonlyArray', 'Date', 'Error', 'RegExp',
+		'True', 'False', 'JsonPrimitive', 'JsonValue', 'JsonObject', 'JsonArray',
+	]);
+
+	const addDeclaredName = (name?: ts.Identifier): void => {
+		if (!name?.text) return;
+		knownSymbols.add(name.text);
+	};
+
+	const collectTypeParams = (node: ts.Node): void => {
+		if (!('typeParameters' in node)) return;
+		const maybeTypeParameters = (node as ts.Node & { typeParameters?: ts.NodeArray<ts.TypeParameterDeclaration> }).typeParameters;
+		if (!maybeTypeParameters) return;
+		for (const typeParameter of maybeTypeParameters) {
+			knownSymbols.add(typeParameter.name.text);
+		}
+	};
+
+	const collectKnownSymbols = (node: ts.Node): void => {
+		if (ts.isInferTypeNode(node)) {
+			knownSymbols.add(node.typeParameter.name.text);
+		}
+
+		if (ts.isMappedTypeNode(node) && node.typeParameter?.name) {
+			knownSymbols.add(node.typeParameter.name.text);
+		}
+
+		if (ts.isImportDeclaration(node)) {
+			const importClause = node.importClause;
+			if (importClause?.name) knownSymbols.add(importClause.name.text);
+			if (importClause?.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
+				for (const importElement of importClause.namedBindings.elements) {
+					knownSymbols.add((importElement.propertyName ?? importElement.name).text);
+				}
+			}
+			if (importClause?.namedBindings && ts.isNamespaceImport(importClause.namedBindings)) {
+				knownSymbols.add(importClause.namedBindings.name.text);
+			}
+		}
+
+		if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isClassDeclaration(node) || ts.isEnumDeclaration(node) || ts.isFunctionDeclaration(node)) {
+			addDeclaredName(node.name as ts.Identifier | undefined);
+			collectTypeParams(node);
+		}
+
+		if (ts.isTypeReferenceNode(node)) {
+			const typeName = node.typeName;
+			if (ts.isIdentifier(typeName)) {
+				referencedSymbols.add(typeName.text);
+			}
+			if (ts.isQualifiedName(typeName) && ts.isIdentifier(typeName.left)) {
+				referencedSymbols.add(typeName.left.text);
+			}
+		}
+
+		ts.forEachChild(node, collectKnownSymbols);
+	};
+
+	collectKnownSymbols(sourceFile);
+
+	const unknown = Array.from(referencedSymbols)
+		.filter((name) => !knownSymbols.has(name) && !builtIns.has(name))
+		.sort();
+
+	if (unknown.length > 0) {
+		throw new Error(`[TypeMapGenerator] Generated type map has unresolved type identifiers: ${unknown.join(', ')}`);
+	}
 };
 
 export const buildTypeMapArtifacts = ({
@@ -267,6 +345,8 @@ export type SyncClientOutput<P extends SyncPagePath, N extends SyncName<P>, V ex
 
 export type FullSyncPath<P extends SyncPagePath, N extends SyncName<P>, V extends SyncVersion<P, N>> = \`sync/\${P}/\${N & string}/\${V & string}\`;
 `;
+
+	validateGeneratedTypeIdentifiers(content);
 
 	return { content, docsData };
 };

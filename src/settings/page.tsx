@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import Avatar from "src/_components/Avatar";
 import ThemeToggler from "src/_components/ThemeToggler";
@@ -28,6 +28,11 @@ export default function Home() {
   const saveUser = useCallback(async (newAvatar?: string) => {
     if (!session) return;
 
+    const avatarChanged = newAvatar
+      ? stripAvatarVersion(newAvatar) !== stripAvatarVersion(session.avatar)
+      : false;
+    const avatarToSave = avatarChanged ? newAvatar : undefined;
+
     if (
       newLanguage === session.language
       && newName === session.name
@@ -43,7 +48,7 @@ export default function Home() {
       version: 'v1',
       data: {
         language: newLanguage === session.language ? undefined : newLanguage,
-        avatar: !newAvatar ? undefined : stripAvatarVersion(newAvatar) === stripAvatarVersion(session.avatar) ? undefined : newAvatar,
+        avatar: avatarToSave,
         name: newName === session.name ? undefined : newName,
         theme: newTheme === session.theme ? undefined : newTheme,
       },
@@ -101,7 +106,7 @@ export default function Home() {
                     if (typeof result === 'string') {
                       // setNewAvatar(prevUrl => `${result}?v=${String(incrementAvatarVersion(prevUrl || ""))}`)
                       // setNewAvatar(result);
-                      saveUser(`${result}?v=${Date.now()}`); // Add a cache buster to ensure the new avatar is loaded
+                      void saveUser(`${result}?v=${String(Date.now())}`); // Add a cache buster to ensure the new avatar is loaded
                     }
                   });
                   reader.readAsDataURL(file);

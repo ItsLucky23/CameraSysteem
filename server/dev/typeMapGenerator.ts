@@ -1,8 +1,14 @@
 import { findAllApiFiles, findAllSyncClientFiles, findAllSyncServerFiles } from './typeMap/discovery';
-import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion } from './typeMap/routeMeta';
+import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion, getRouteAliases } from './typeMap/routeMeta';
 import { extractAuth, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
 import { buildTypeMapArtifacts, writeTypeMapArtifacts } from './typeMap/emitterArtifacts';
-import { getInputTypeFromFile, getOutputTypeFromFile, getSyncClientDataType, getSyncClientOutputType, getSyncServerOutputType } from './typeMap/extractors';
+import {
+  getInputTypeDetailsFromFile,
+  getOutputTypeDetailsFromFile,
+  getSyncClientDataTypeDetailsFromFile,
+  getSyncClientOutputTypeDetailsFromFile,
+  getSyncServerOutputTypeDetailsFromFile,
+} from './typeMap/extractors';
 import { generateServerFunctions } from './typeMap/functionsMeta';
 import { invalidateProgramCache } from './typeMap/tsProgram';
 import { SRC_DIR } from '../utils/paths';
@@ -23,6 +29,7 @@ export const generateTypeMapFile = (): void => {
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles(SRC_DIR);
   const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
+  const unresolvedErrors: string[] = [];
 
   console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
 
@@ -35,18 +42,34 @@ export const generateTypeMapFile = (): void => {
 
     // TypeChecker-based extractors return fully-expanded inline types.
     // No import collection or sanitization is needed for API types.
-    const inputType = getInputTypeFromFile(filePath);
-    const outputType = getOutputTypeFromFile(filePath);
+    const inputTypeResult = getInputTypeDetailsFromFile(filePath);
+    const outputTypeResult = getOutputTypeDetailsFromFile(filePath);
+    const inputType = inputTypeResult.text;
+    const outputType = outputTypeResult.text;
     const httpMethod = extractHttpMethod(filePath, apiName);
     const rateLimit = extractRateLimit(filePath);
     const auth = extractAuth(filePath);
 
+    for (const symbol of [...inputTypeResult.unresolvedSymbols, ...outputTypeResult.unresolvedSymbols]) {
+      if (!symbol.importPath) {
+        unresolvedErrors.push(`API ${pagePath}/${apiName}/${apiVersion} (${filePath}): unresolved type ${symbol.name}`);
+        continue;
+      }
+      if (!namedImports.has(symbol.importPath)) {
+        namedImports.set(symbol.importPath, new Set<string>());
+      }
+      namedImports.get(symbol.importPath)!.add(symbol.name);
+    }
+
     console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
 
-    if (!typesByPage.has(pagePath)) {
-      typesByPage.set(pagePath, new Map());
+    const targetPages = [pagePath, ...getRouteAliases(pagePath)];
+    for (const targetPagePath of targetPages) {
+      if (!typesByPage.has(targetPagePath)) {
+        typesByPage.set(targetPagePath, new Map());
+      }
+      typesByPage.get(targetPagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, method: httpMethod, rateLimit, auth, version: apiVersion });
     }
-    typesByPage.get(pagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, method: httpMethod, rateLimit, auth, version: apiVersion });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -92,21 +115,53 @@ export const generateTypeMapFile = (): void => {
   for (const [, { pagePath, syncName, serverFile, clientFile }] of allSyncs) {
     const syncVersion = extractSyncVersion(serverFile || clientFile || '');
 
-    const clientInputType = serverFile
-      ? getSyncClientDataType(serverFile)
+    const clientInputTypeResult = serverFile
+      ? getSyncClientDataTypeDetailsFromFile(serverFile)
       : clientFile
-        ? getSyncClientDataType(clientFile)
-        : '{ }';
+        ? getSyncClientDataTypeDetailsFromFile(clientFile)
+        : { text: '{ }', unresolvedSymbols: [] };
 
-    const serverOutputType = serverFile ? getSyncServerOutputType(serverFile) : '{ }';
-    const clientOutputType = clientFile ? getSyncClientOutputType(clientFile) : '{ }';
+    const serverOutputTypeResult = serverFile
+      ? getSyncServerOutputTypeDetailsFromFile(serverFile)
+      : { text: '{ }', unresolvedSymbols: [] };
+    const clientOutputTypeResult = clientFile
+      ? getSyncClientOutputTypeDetailsFromFile(clientFile)
+      : { text: '{ }', unresolvedSymbols: [] };
+
+    const clientInputType = clientInputTypeResult.text;
+    const serverOutputType = serverOutputTypeResult.text;
+    const clientOutputType = clientOutputTypeResult.text;
+
+    const allSyncUnresolvedSymbols = [
+      ...clientInputTypeResult.unresolvedSymbols,
+      ...serverOutputTypeResult.unresolvedSymbols,
+      ...clientOutputTypeResult.unresolvedSymbols,
+    ];
+
+    for (const symbol of allSyncUnresolvedSymbols) {
+      if (!symbol.importPath) {
+        unresolvedErrors.push(`Sync ${pagePath}/${syncName}/${syncVersion} (${serverFile ?? clientFile}): unresolved type ${symbol.name}`);
+        continue;
+      }
+      if (!namedImports.has(symbol.importPath)) {
+        namedImports.set(symbol.importPath, new Set<string>());
+      }
+      namedImports.get(symbol.importPath)!.add(symbol.name);
+    }
 
     console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
 
-    if (!syncTypesByPage.has(pagePath)) {
-      syncTypesByPage.set(pagePath, new Map());
+    const targetPages = [pagePath, ...getRouteAliases(pagePath)];
+    for (const targetPagePath of targetPages) {
+      if (!syncTypesByPage.has(targetPagePath)) {
+        syncTypesByPage.set(targetPagePath, new Map());
+      }
+      syncTypesByPage.get(targetPagePath)!.set(`${syncName}@${syncVersion}`, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType, version: syncVersion });
     }
-    syncTypesByPage.get(pagePath)!.set(`${syncName}@${syncVersion}`, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType, version: syncVersion });
+  }
+
+  if (unresolvedErrors.length > 0) {
+    throw new Error(`[TypeMapGenerator] Unresolved type references:\n${unresolvedErrors.map((item) => `- ${item}`).join('\n')}`);
   }
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
