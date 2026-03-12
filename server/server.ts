@@ -20,6 +20,7 @@ import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
+import { checkRateLimit } from './utils/rateLimiter';
 
 const REDACTED_LOG_KEYS = new Set([
   'password',
@@ -61,6 +62,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader("Access-Control-Expose-Headers", "X-Session-Token");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader('Referrer-Policy', 'no-referrer'); // prevents the browser from leaking sensative urls
   res.setHeader('X-Frame-Options', 'SAMEORIGIN'); // only allows iframes to use this pages content if on the same domain
@@ -144,6 +146,24 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       return res.end();
     }
 
+    if (config.rateLimiting.defaultApiLimit !== false && config.rateLimiting.defaultApiLimit > 0) {
+      const requesterIp = req.socket.remoteAddress ?? 'unknown';
+      const { allowed, resetIn } = checkRateLimit({
+        key: `ip:${requesterIp}:auth:credentials`,
+        limit: config.rateLimiting.defaultApiLimit,
+        windowMs: config.rateLimiting.windowMs,
+      });
+
+      if (!allowed) {
+        res.setHeader('content-type', 'application/json; charset=utf-8');
+        return res.end(JSON.stringify({
+          status: false,
+          reason: 'api.rateLimitExceeded',
+          errorParams: [{ key: 'seconds', value: resetIn }],
+        }));
+      }
+    }
+
     //? here all the logic happends for login or creating an account with credentials
     const { status, reason, newToken, session } = await loginWithCredentials(params) as {
       status: boolean,
@@ -168,10 +188,13 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
 
       res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
+      if (config.sessionBasedToken) {
+        res.setHeader("X-Session-Token", newToken);
+      }
       // return res.end(JSON.stringify({ status, reason, session })) 
       // } else { 
     }
-    return res.end(JSON.stringify({ status, reason, session, newToken }))
+    return res.end(JSON.stringify({ status, reason, session, authenticated: Boolean(newToken) }))
 
   } else if (z.string().startsWith('/auth/callback').safeParse(routePath).success) {
     //? this endpoint is triggerd by the oauth provider after the user has logged in

@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 
-import config, { dev } from "config";
+import config, { dev, loginRedirectUrl } from "config";
 import Middleware from 'src/_components/Middleware';
 import Navbar from "src/_components/Navbar";
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
@@ -56,7 +56,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
 
   const handleConfirmNavigate = useCallback(() => {
     ref.close();
-    handleNavigate(location.pathname === '/settings' ? '/home' : '/settings');
+    handleNavigate(location.pathname === '/settings' ? loginRedirectUrl : '/settings');
   }, [ref, handleNavigate, location.pathname]);
 
   const handleLogout = useCallback(() => {
@@ -91,7 +91,7 @@ function HomeTemplate({ children }: { children: React.ReactNode }) {
                 />
               )
             } else {
-              handleNavigate(location.pathname === '/settings' ? '/home' : '/settings');
+              handleNavigate(location.pathname === '/settings' ? loginRedirectUrl : '/settings');
             }
           }}
         >

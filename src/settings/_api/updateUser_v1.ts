@@ -2,6 +2,7 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import sharp from 'sharp';
 import path from 'path';
+import { mkdir } from 'fs/promises';
 import { UPLOADS_DIR } from '../../../server/utils/paths';
 
 export const rateLimit: number | false = 20;
@@ -37,6 +38,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       const filePath = path.join(UPLOADS_DIR, fileName);
 
       try {
+        await mkdir(UPLOADS_DIR, { recursive: true });
+
         await sharp(buffer)
           .webp({ quality: 80 })
           .toFile(filePath);

@@ -71,6 +71,11 @@ const asRecord = (value: unknown): Record<string, any> => {
   return {};
 };
 
+const sanitizeUserForSession = <T extends { password?: unknown }>(user: T): Omit<T, 'password'> => {
+  const { password: _password, ...safeUser } = user;
+  return safeUser;
+};
+
 // Route that starts the OAuth flow for the specified provider and redirects to the callback endpoint
 const loginWithCredentials = async (params: paramsType) => {
 
@@ -131,7 +136,13 @@ const loginWithCredentials = async (params: paramsType) => {
     //? here we create the new user
     const [createNewUserError, createNewUserResponse] = await tryCatch(createNewUser);
     if (createNewUserError) { return { status: false, reason: createNewUserError }; }
-    if (createNewUserResponse) { return { status: true, reason: 'login.userCreated', session: createNewUserResponse }; }
+    if (createNewUserResponse) {
+      return {
+        status: true,
+        reason: 'login.userCreated',
+        session: sanitizeUserForSession(createNewUserResponse),
+      };
+    }
     return { status: false, reason: 'login.createUserFailed' };
 
   } else { //? login
@@ -179,8 +190,8 @@ const loginWithCredentials = async (params: paramsType) => {
       //   language: findUserResponse.language,
       //   theme: findUserResponse.theme
       // };
-      const newUser = {
-        ...findUserResponse,
+      const newUser: SessionLayout = {
+        ...sanitizeUserForSession(findUserResponse),
         token: newToken,
       }
           
@@ -254,7 +265,9 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
       params.append('grant_type', 'authorization_code');
       params.append('redirect_uri', provider.callbackURL);
 
-      console.log(params)
+      if (isDevMode) {
+        console.log(params)
+      }
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -352,7 +365,7 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
       }
 
       tempUser = {
-        ...userDataResponse,
+        ...sanitizeUserForSession(userDataResponse),
         token: ''
       };
     }
@@ -380,7 +393,7 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
 
       if (createNewUserResponse) {
         tempUser = {
-          ...createNewUserResponse,
+          ...sanitizeUserForSession(createNewUserResponse),
           token: ''
         };
       }

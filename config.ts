@@ -132,7 +132,7 @@ const config = {
 // TYPE DEFINITIONS
 // ============================================
  
-export interface SessionLayout extends User {
+export interface SessionLayout extends Omit<User, 'password'> {
   avatarFallback: string;
   token: string;
   roomCodes?: string[];

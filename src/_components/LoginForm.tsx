@@ -59,7 +59,18 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
         body: JSON.stringify({ name, email, password, confirmPassword, provider }),
         credentials: "include",
       });
-      return (await res.json()) as { status: boolean; reason: string, newToken: string | null, session: SessionLayout | undefined };
+      const sessionToken = res.headers.get("x-session-token");
+      const body = (await res.json()) as {
+        status: boolean;
+        reason: string;
+        session: SessionLayout | undefined;
+        authenticated?: boolean;
+      };
+
+      return {
+        ...body,
+        sessionToken,
+      };
     };
 
     const [error, response] = await tryCatch(fetchUser);
@@ -78,10 +89,10 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
 
     notify.success({ key: response.reason });
     setTimeout(() => {
-      if (response.newToken && sessionBasedToken) {
-        sessionStorage.setItem("token", response.newToken);
+      if (response.sessionToken && sessionBasedToken) {
+        sessionStorage.setItem("token", response.sessionToken);
       }
-      globalThis.location.href = response.newToken ? loginRedirectUrl : loginPageUrl;
+      globalThis.location.href = response.authenticated ? loginRedirectUrl : loginPageUrl;
     }, 1000);
   };
 

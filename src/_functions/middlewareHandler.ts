@@ -18,11 +18,6 @@ export default function middlewareHandler({
 }) {
 
   switch (location) {
-    case '/test':
-      if (session?.email && session?.provider) {
-        return { success: true };
-      }
-      return { redirect: '/login' };
 
     case '/admin':
       if (session?.email && session?.provider && session?.admin === true) {
@@ -33,27 +28,6 @@ export default function middlewareHandler({
         notify.error({ key: 'middleware.notAdmin' });
       }
       return
-
-    case '/games/boerZoektVrouw':
-      if (session?.email && session?.provider) {
-        return { success: true };
-      } else {
-        return { redirect: '/login' };
-      }
-
-    case '/home':
-      if (session?.email && session?.provider) {
-        return { success: true };
-      } else {
-        return { redirect: '/login' };
-      }
-
-    case '/games':
-      if (session?.email && session?.provider) {
-        return { success: true };
-      } else {
-        return { redirect: '/login' };
-      }
 
     case '/examples':
       if (session?.email && session?.provider) {
