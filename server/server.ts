@@ -88,7 +88,6 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     .find(row => row.startsWith('token='))
     ?.split('=')[1];
 
-
   //? here we load the application icon
   if (z.literal('/favicon.ico').safeParse(routePath).success) {
     return serveFavicon(res);
