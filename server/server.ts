@@ -7,7 +7,7 @@ initializeSentry();
 
 import http from 'http';
 import getParams from './utils/getParams';
-import { loginWithCredentials, loginCallback } from './auth/login';
+import { loginWithCredentials, loginCallback, createOAuthState } from './auth/login';
 import { serveFavicon, serveFile } from './prod/serveFile';
 import loadSocket from './sockets/socket';
 import z from 'zod';
@@ -20,6 +20,33 @@ import { serveAvatar } from './utils/serveAvatars';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
+
+const REDACTED_LOG_KEYS = new Set([
+  'password',
+  'confirmPassword',
+  'token',
+  'authorization',
+  'cookie',
+  'clientSecret',
+  'access_token',
+  'refresh_token',
+]);
+
+const sanitizeForLog = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map(sanitizeForLog);
+  }
+
+  if (value && typeof value === 'object') {
+    const output: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = REDACTED_LOG_KEYS.has(key) ? '[REDACTED]' : sanitizeForLog(val);
+    }
+    return output;
+  }
+
+  return value;
+};
 
 const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse) => {
 
@@ -73,7 +100,8 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   //? we log the request and if there are any params we log them with the request
   if (params && typeof params == 'object' && Object.keys(params).length !== 0) {
-    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(params)}`, 'magenta')
+    const safeParams = sanitizeForLog(params);
+    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
   } else {
     console.log(`method: ${method}, url: ${routePath}`, 'magenta');
     params = {};
@@ -93,8 +121,19 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (!provider || !provider.name) { return { provider, status: false, reason: 'login.providerNotFound' }; }
 
     if (provider?.name != 'credentials' && 'scope' in provider) {
+      const oauthState = await createOAuthState(provider.name);
+      if (!oauthState) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        return res.end('OAuth state initialization failed');
+      }
+
+      const clientId = encodeURIComponent(provider.clientID);
+      const callbackUrl = encodeURIComponent(provider.callbackURL);
+      const scope = encodeURIComponent(provider.scope.join(' '));
+      const state = encodeURIComponent(oauthState);
+
       res.writeHead(302, {
-        'Location': `${provider.authorizationURL}?client_id=${provider.clientID}&redirect_uri=${provider.callbackURL}&scope=${provider.scope.join('%20')}&response_type=code&prompt=select_account`,
+        'Location': `${provider.authorizationURL}?client_id=${clientId}&redirect_uri=${callbackUrl}&scope=${scope}&response_type=code&prompt=select_account&state=${state}`,
       });
       return res.end();
     }
@@ -117,7 +156,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (newToken) {
       if (token) { await deleteSession(token); }
 
-      console.log('setting cookie with newToken: ', newToken, 'green');
+      if (process.env.NODE_ENV === 'development') {
+        console.log('setting cookie with new token', 'green');
+      }
       const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
 
       res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
@@ -142,7 +183,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     if (token) { await deleteSession(token); }
 
     //? we set the cookie with the new token and redirect the user to the frontend
-    console.log('setting cookie with newToken: ', newToken, 'green');
+    if (process.env.NODE_ENV === 'development') {
+      console.log('setting cookie or redirect with new token', 'green');
+    }
     const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
 
     const location = process.env.DNS

@@ -81,21 +81,25 @@ const oauthProviders = [
    ↓
 2. Redirect to: /auth/api/google
    ↓
-3. Server redirects to Google OAuth URL
+3. Server generates and stores one-time OAuth state (short TTL)
+  ↓
+4. Server redirects to Google OAuth URL with code + state parameters
    ↓
-4. User authenticates with Google
+5. User authenticates with Google
    ↓
-5. Google redirects to: /auth/callback/google?code=...
+6. Google redirects to: /auth/callback/google?code=...&state=...
    ↓
-6. Server exchanges code for token
+7. Server validates and consumes OAuth state (anti-CSRF)
    ↓
-7. Server fetches user profile from Google
+8. Server exchanges code for token
    ↓
-8. Server creates/finds user in database
+9. Server fetches user profile from Google
    ↓
-9. Server creates session in Redis
+10. Server creates/finds user in database
    ↓
-10. Redirect to frontend with token cookie
+11. Server creates session in Redis
+  ↓
+12. Redirect to frontend with token cookie
 ```
 
 ### Credentials Flow
@@ -215,8 +219,9 @@ switch (location) {
 
 ## Security Considerations
 
-1. **CORS** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed
-2. **HttpOnly cookies** - Tokens not accessible via JavaScript
-3. **bcrypt** - Passwords hashed with salt rounds
+1. **OAuth state** - One-time state is generated/validated to mitigate OAuth login CSRF
+2. **CORS** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed
+3. **HttpOnly cookies** - Tokens not accessible via JavaScript
+4. **bcrypt** - Passwords hashed with salt rounds
 4. **CSRF** - WebSocket architecture inherently prevents CSRF
 5. **Origin check** - Every request validates origin header

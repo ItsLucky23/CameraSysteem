@@ -13,6 +13,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import tryCatch from '../../shared/tryCatch';
 import { UPLOADS_DIR } from '../utils/paths';
+import redis from '../functions/redis';
 
 dotenv.config();
 
@@ -24,6 +25,44 @@ type paramsType = {
 }
 
 const uploadsFolder = UPLOADS_DIR;
+const OAUTH_STATE_TTL_SECONDS = 60 * 10;
+const isDevMode = process.env.NODE_ENV === 'development';
+
+const getOAuthStateKey = (providerName: string, state: string): string => {
+  const projectName = process.env.PROJECT_NAME || 'luckystack';
+  return `${projectName}-oauth-state:${providerName}:${state}`;
+};
+
+export const createOAuthState = async (providerName: string): Promise<string | null> => {
+  const state = randomBytes(32).toString('hex');
+  const key = getOAuthStateKey(providerName, state);
+  const result = await redis.set(key, '1', 'EX', OAUTH_STATE_TTL_SECONDS, 'NX');
+
+  if (result !== 'OK') {
+    return null;
+  }
+
+  return state;
+};
+
+const consumeOAuthState = async (providerName: string, state: string): Promise<boolean> => {
+  if (!state) {
+    return false;
+  }
+
+  const key = getOAuthStateKey(providerName, state);
+  const txResult = await redis.multi().get(key).del(key).exec();
+  if (!txResult || txResult.length < 2) {
+    return false;
+  }
+
+  const getResult = txResult[0];
+  if (!getResult || getResult[0]) {
+    return false;
+  }
+
+  return getResult[1] === '1';
+};
 
 const asRecord = (value: unknown): Record<string, any> => {
   if (value && typeof value === 'object') {
@@ -40,7 +79,9 @@ const loginWithCredentials = async (params: paramsType) => {
   const name = params.name ? validator.escape(params.name) : undefined;
   const confirmPassword = params.confirmPassword ? validator.escape(params.confirmPassword) : undefined;
 
-  console.log(name, email, password, confirmPassword)
+  if (isDevMode) {
+    console.log(`credentials auth attempt for ${email || 'unknown-email'}`, 'gray');
+  }
 
   if (!email || !password) { return { status: false, reason: 'login.empty' }; }
   if (email.length > 191) { return { status: false, reason: 'login.emailCharacterLimit' }; }
@@ -150,7 +191,9 @@ const loginWithCredentials = async (params: paramsType) => {
       }
 
       await saveSession(newToken, newUser, true);
-      console.log(newUser);
+      if (isDevMode) {
+        console.log(`credentials login success for user ${newUser.id}`, 'green');
+      }
       return { status: true, reason: 'login.loggedIn', newToken, session: newUser };
     }
   }
@@ -167,6 +210,13 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
   const queryString = req.url.split('?')[1]; // Get the part after '?'
   const params = new URLSearchParams(queryString);
   const code = params.get('code');
+  const state = params.get('state');
+
+  const stateIsValid = await consumeOAuthState(provider.name, state || '');
+  if (!stateIsValid) {
+    console.log('invalid or missing oauth state');
+    return false;
+  }
 
   //? if no code provided in the url we return false (the code is used to get the access token and should be provided by the oauth provider)
   if (!code || code == '') {
@@ -293,7 +343,6 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
       return false;
     }
 
-    console.log('ASDSADASDDASDA')
     //? if the user exists we assign it to the tempUser variable
     if (userDataResponse?.id) {
       // const { password, ...safeData } = userDataResponse;
@@ -355,7 +404,9 @@ const loginCallback = async (pathname: string, req: IncomingMessage, _res: Serve
 
   tempUser.token = newToken;
   await saveSession(newToken, tempUser, true);
-  console.log(tempUser)
+  if (isDevMode) {
+    console.log(`oauth login success for user ${tempUser.id}`, 'green');
+  }
   return newToken;
 }
 
