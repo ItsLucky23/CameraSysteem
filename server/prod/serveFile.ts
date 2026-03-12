@@ -78,8 +78,7 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
     filePath.includes('README.md') ||
     filePath.includes('redis.conf') ||
     filePath.includes('tailwind.config.js') ||
-    filePath.includes('tsconfig.app.json') ||
-    filePath.includes('tsconfig.json') ||
+    filePath.includes('tsconfig.client.json') ||
     filePath.includes('tsconfig.node.json') ||
     filePath.includes('vite.config.ts') ||
     filePath.includes('schema.prisma')

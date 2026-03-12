@@ -18,7 +18,6 @@ export type NormalizedErrorResponse = {
   httpStatus?: number;
 };
 
-export const INVALID_ERROR_RESPONSE_MESSAGE = 'api didnt provide an errorCode in the return body';
 export const INVALID_ERROR_RESPONSE_CODE = 'error.invalidResponse';
 
 export const isErrorParamArray = (value: unknown): value is ErrorParam[] => {
@@ -51,7 +50,7 @@ export const normalizeErrorResponseCore = ({
 
   const message = resolveMessage
     ? resolveMessage({ errorCode: finalErrorCode, errorParams: normalizedParams })
-    : (hasErrorCode ? finalErrorCode : INVALID_ERROR_RESPONSE_MESSAGE);
+    : finalErrorCode;
 
   return {
     status: 'error',

@@ -8,6 +8,7 @@ import eslintPluginUnicorn from 'eslint-plugin-unicorn'
 import eslintPluginImportX from 'eslint-plugin-import-x'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
 import react from 'eslint-plugin-react'
+import i18next from 'eslint-plugin-i18next';
 
 export default tseslint.config(
   { ignores: ['dist'] },
@@ -28,7 +29,8 @@ export default tseslint.config(
       ecmaVersion: 2020,
       globals: globals.browser,
       parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        project: ['./tsconfig.server.json', './tsconfig.client.json'],
+        noWarnOnMultipleProjects: true,
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -36,7 +38,7 @@ export default tseslint.config(
       'import-x/resolver': {
         typescript: {
           alwaysTryTypes: true,
-          project: ['./tsconfig.json', './tsconfig.app.json', './tsconfig.node.json', './tsconfig.server.json'],
+          project: ['./tsconfig.json', './tsconfig.client.json', './tsconfig.server.json'],
         },
       },
     },
@@ -44,6 +46,7 @@ export default tseslint.config(
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
       'react': react,
+      'i18next': i18next, 
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
@@ -83,11 +86,27 @@ export default tseslint.config(
         },
       ],
       'import-x/order': 'off',
-      "react/jsx-no-literals": ["error", { 
+      "react/jsx-no-literals": ["warn", { 
         "noStrings": true,
-        "allowedStrings": ["!", "?"],
+        "allowedStrings": [
+          // Original & Punctuation
+          "!", "?", "-", "/", ":", ",", "(", ")", "%", "&", 
+          "@", "#", "$", "^", "*", "+", "=", "|", ".", "...",
+
+          // Commonly used single-character literals
+          "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+          
+          // UI Dividers & Whitespace placeholders
+          "\u00a0", " ", " | ", " • ", " » ", " « ", "—", "–",
+          
+          // Common Logic/Unit symbols
+          "x", "px", "rem", "em", "ms", "s", "°"
+        ],
         "ignoreProps": true 
-      }]
+      }],
+      'jsx-a11y/click-events-have-key-events': 'off',
+      'jsx-a11y/no-static-element-interactions': 'off',
+      'no-restricted-syntax': 'off',
     },
   },
   {

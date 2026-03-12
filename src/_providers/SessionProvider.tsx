@@ -25,11 +25,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [session])
 
   useEffect(() => {
-    document.title = dev && session?.email 
-      ? `[DEV] ${session?.email} - ${pageTitle}` 
-      : dev
-      ? `[DEV] ${pageTitle}`
-      : pageTitle;
+    if (dev && session?.email) {
+      document.title = `[DEV] ${session.email} - ${pageTitle}`;
+      return;
+    }
+
+    document.title = dev ? `[DEV] ${pageTitle}` : pageTitle;
   }, [session?.email]);
 
   useEffect(() => {

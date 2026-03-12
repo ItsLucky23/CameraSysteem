@@ -24,7 +24,7 @@ export default defineConfig(({ command }) => {
     plugins: [
       react(),
       tsconfigPaths({
-        projects: ['tsconfig.app.json', 'tsconfig.server.json'],
+        projects: ['tsconfig.client.json', 'tsconfig.server.json'],
       }),
     ],
     build: {

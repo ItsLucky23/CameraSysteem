@@ -1,5 +1,5 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "./tsconfig.shared.json",
   "compilerOptions": {
     "target": "ES2020", /* Override base target for broader browser support */
     "useDefineForClassFields": true, /* Emit class fields with Define semantics. */

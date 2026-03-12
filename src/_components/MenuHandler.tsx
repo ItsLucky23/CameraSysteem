@@ -112,8 +112,8 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
       if (prev.length === 0) return prev;
       const lastitem = prev.length === 1;
       const newStack = [...prev];
-      const top = newStack[newStack.length - 1];
-      const second = newStack[newStack.length - 2];
+      const top = newStack.at(-1);
+      const second = newStack.at(-2);
 
       if (!top) return prev;
 
@@ -139,11 +139,9 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
             current[lastIndex].resolver?.(null);
             
             // If there's a second item, and it was marked as soonIsTop, update it
-            if (second) {
-              const secondIndex = current.findIndex(s => s.id === second.id);
-              if (secondIndex !== -1 && current[secondIndex].soonIsTop) {
-                current[secondIndex] = { ...current[secondIndex], soonIsTop: false };
-              }
+            const secondIndex = current.findIndex(s => s.id === second?.id);
+            if (secondIndex !== -1 && current[secondIndex].soonIsTop) {
+              current[secondIndex] = { ...current[secondIndex], soonIsTop: false };
             }
 
             return current.filter(s => s.id !== top.id);
@@ -170,7 +168,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
 
 
 
-  const stackTop = stack[stack.length - 1];
+  const stackTop = stack.at(-1);
   const sizeClass = stackTop?.options.size
     ? { sm: '384px', md: '512px', lg: '768px' }[stackTop.options.size]
     : '384px';
@@ -178,8 +176,9 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [lastChildHeight, setLastChildHeight] = useState<number>(0);
 
   const updateLastChildHeight = useCallback(() => {
-    const lastChild = document.querySelector('#MENUHANDLER')?.lastElementChild as HTMLElement | null;
-    if (!lastChild) {
+    const target = document.querySelector('#MENUHANDLER');
+    const lastChild = target?.lastElementChild;
+    if (!(lastChild instanceof HTMLElement)) {
       setLastChildHeight(0);
       return;
     }
@@ -192,20 +191,22 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     updateLastChildHeight();
 
-    const target = document.querySelector('#MENUHANDLER') as HTMLElement | null;
-    if (!target) return;
+    const target = document.querySelector('#MENUHANDLER');
+    if (!(target instanceof HTMLElement)) return;
 
     const observer = new ResizeObserver(() => {
       updateLastChildHeight();
     });
 
     observer.observe(target);
-    const lastChild = target.lastElementChild as HTMLElement | null;
-    if (lastChild) {
+    const lastChild = target.lastElementChild;
+    if (lastChild instanceof HTMLElement) {
       observer.observe(lastChild);
     }
 
-    const onResize = () => updateLastChildHeight();
+    const onResize = () => {
+      updateLastChildHeight();
+    };
     window.addEventListener('resize', onResize);
 
     return () => {
@@ -241,7 +242,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           role="button"
           tabIndex={0}
           className={`absolute top-0 left-0 w-full h-full flex items-center justify-center z-[1000] overflow-hidden transition-colors duration-200 ${stack.length === 0 ? 'pointer-events-none' : ''}`}
-          style={{ backgroundColor: stackTop && !stackTop.isClosing && stackTop.options.dimBackground === true ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
+          style={{ backgroundColor: !stackTop?.isClosing && stackTop?.options.dimBackground === true ? 'rgba(0, 0, 0, 0.7)' : 'transparent' }}
           onMouseDown={() => { attemptToCloseAllRef.current = true; }}
           onMouseUp={() => {
             if (!attemptToCloseAllRef.current) { return }
@@ -252,7 +253,7 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           <div
             role="presentation"
             id="MENUHANDLER"
-            className={`rounded-md overflow-hidden relative transition-all duration-200 ${stackTop && !stackTop.isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
+            className={`rounded-md overflow-hidden relative transition-all duration-200 ${stackTop?.isClosing ? 'scale-95 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
             style={{ width: sizeClass, height: `${String(lastChildHeight)}px` }}
             onMouseDown={(e) => { e.stopPropagation(); }}
             onMouseUp={(e) => { e.stopPropagation(); }}
