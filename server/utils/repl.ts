@@ -1,25 +1,37 @@
 import { getAllGameDatas, getGameData, saveGameData } from "../functions/game"
 import { deleteSession, getAllSessions, getSession } from "../functions/session"
 import repl from 'repl';
-import { devApis, devSyncs } from "../dev/loader";
 import { apis, syncs } from "../prod/generatedApis";
 
-const getActiveApiMap = (): Record<string, unknown> => {
+const getRuntimeDevMaps = async () => {
+  if (process.env.NODE_ENV !== 'production') {
+    return await import('../dev/loader');
+  }
+
+  return {
+    devApis: {},
+    devSyncs: {},
+  };
+};
+
+const getActiveApiMap = async (): Promise<Record<string, unknown>> => {
+  const { devApis } = await getRuntimeDevMaps();
   if (Object.keys(devApis).length > 0) {
     return devApis;
   }
   return apis;
 };
 
-const getActiveSyncMap = (): Record<string, unknown> => {
+const getActiveSyncMap = async (): Promise<Record<string, unknown>> => {
+  const { devSyncs } = await getRuntimeDevMaps();
   if (Object.keys(devSyncs).length > 0) {
     return devSyncs;
   }
   return syncs as Record<string, unknown>;
 };
 
-const normalizeApiUrls = (): string[] => {
-  const routeKeys = Object.keys(getActiveApiMap())
+const normalizeApiUrls = async (): Promise<string[]> => {
+  const routeKeys = Object.keys(await getActiveApiMap())
     .filter((key) => key.startsWith('api/'))
     .map((key) => `/${key}`)
     .sort((a, b) => a.localeCompare(b));
@@ -27,8 +39,8 @@ const normalizeApiUrls = (): string[] => {
   return Array.from(new Set(routeKeys));
 };
 
-const normalizeSyncUrls = (): string[] => {
-  const routeKeys = Object.keys(getActiveSyncMap())
+const normalizeSyncUrls = async (): Promise<string[]> => {
+  const routeKeys = Object.keys(await getActiveSyncMap())
     .filter((key) => key.startsWith('sync/'))
     .map((key) => key.replace(/_(client|server)$/, ''))
     .map((key) => `/${key}`)
@@ -138,8 +150,8 @@ export const initRepl = () => {
     console.log('listSyncUrls() -- prints all discovered sync urls')
   }
 
-  replInstance.context.listApiUrls = () => {
-    const urls = normalizeApiUrls();
+  replInstance.context.listApiUrls = async () => {
+    const urls = await normalizeApiUrls();
     if (urls.length === 0) {
       console.log('No API urls found.');
       return urls;
@@ -152,8 +164,8 @@ export const initRepl = () => {
     return urls;
   }
 
-  replInstance.context.listSyncUrls = () => {
-    const urls = normalizeSyncUrls();
+  replInstance.context.listSyncUrls = async () => {
+    const urls = await normalizeSyncUrls();
     if (urls.length === 0) {
       console.log('No sync urls found.');
       return urls;

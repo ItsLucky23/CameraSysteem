@@ -2,10 +2,6 @@ import path from 'path';
 
 const VERSION_SUFFIX_REGEX = /_v(\d+)$/;
 
-const ROUTE_ALIAS_MAP: Record<string, string[]> = {
-  afas: ['timeregister2'],
-};
-
 const stripVersionSuffix = (name: string): string => {
   return name.replace(VERSION_SUFFIX_REGEX, '');
 };
@@ -83,8 +79,4 @@ export const extractSyncVersion = (filePath: string): string => {
 
   const versionMatch = match[1].match(/_(?:server|client)_v(\d+)$/);
   return versionMatch ? `v${versionMatch[1]}` : 'v1';
-};
-
-export const getRouteAliases = (pagePath: string): string[] => {
-  return ROUTE_ALIAS_MAP[pagePath] ?? [];
 };

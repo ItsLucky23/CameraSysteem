@@ -1,5 +1,4 @@
 import { apis, functions } from '../prod/generatedApis'
-import { devApis, devFunctions } from "../dev/loader"
 import { apiMessage } from './socket';
 import { getSession } from '../functions/session';
 import config, { SessionLayout } from '../../config';
@@ -17,6 +16,21 @@ type handleApiRequestType = {
   socket: Socket,
   token: string | null,
 }
+
+const getRuntimeApiMaps = async () => {
+  if (process.env.NODE_ENV !== 'production') {
+    const { devApis, devFunctions } = await import('../dev/loader');
+    return {
+      apisObject: devApis,
+      functionsObject: devFunctions,
+    };
+  }
+
+  return {
+    apisObject: apis,
+    functionsObject: functions,
+  };
+};
 
 export default async function handleApiRequest({ msg, socket, token }: handleApiRequestType) {
   //? This event gets triggered when the client uses the apiRequest function
@@ -81,8 +95,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   console.log(`api: ${name} called`, 'blue');
 
-  const isDevMode = process.env.NODE_ENV !== 'production';
-  const apisObject = isDevMode ? devApis : apis;
+  const { apisObject, functionsObject } = await getRuntimeApiMaps();
 
   //? Resolve API: try exact match first, then fall back to root-level
   //? e.g. client sends "api/examples/session" → not found → try "api/session"
@@ -110,7 +123,7 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   const inputType = apisObject[resolvedName].inputType as string | undefined;
   const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
 
-  const inputValidation = validateInputByType({
+  const inputValidation = await validateInputByType({
     typeText: inputType,
     value: data,
     rootKey: 'data',
@@ -207,7 +220,6 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Execute the API handler
-  const functionsObject = isDevMode ? devFunctions : functions;
   const [error, result] = await tryCatch(
     async () => await main({ data, user, functions: functionsObject })
   );

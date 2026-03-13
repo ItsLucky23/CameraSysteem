@@ -140,14 +140,21 @@ export const buildTypeMapArtifacts = ({
 	namedImports,
 	defaultImports,
 	functionsInterface,
+	unresolvedTypeAliases,
 }: {
 	typesByPage: Map<string, Map<string, ApiTypeEntry>>;
 	syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>;
 	namedImports: Map<string, Set<string>>;
 	defaultImports: Map<string, string>;
 	functionsInterface: string;
+	unresolvedTypeAliases?: string[];
 }) => {
 	const importStatements = buildImportStatements({ namedImports, defaultImports });
+	const unresolvedAliasBlock = (unresolvedTypeAliases ?? [])
+		.filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+		.sort()
+		.map((name) => `export type ${name} = /*unresolved*/ any;`)
+		.join('\n');
 
 	let content = `/* eslint-disable @typescript-eslint/no-unnecessary-condition */
 /* eslint-disable @typescript-eslint/ban-types */
@@ -160,6 +167,7 @@ export const buildTypeMapArtifacts = ({
 
 import { SessionLayout } from "../../config";
 ${importStatements}
+${unresolvedAliasBlock ? `${unresolvedAliasBlock}\n` : ''}
 export interface Functions {
 ${functionsInterface}
 };

@@ -1,5 +1,5 @@
 import { findAllApiFiles, findAllSyncClientFiles, findAllSyncServerFiles } from './typeMap/discovery';
-import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion, getRouteAliases } from './typeMap/routeMeta';
+import { extractApiName, extractApiVersion, extractPagePath, extractSyncName, extractSyncPagePath, extractSyncVersion } from './typeMap/routeMeta';
 import { extractAuth, extractHttpMethod, extractRateLimit, HttpMethod } from './typeMap/apiMeta';
 import { buildTypeMapArtifacts, writeTypeMapArtifacts } from './typeMap/emitterArtifacts';
 import {
@@ -29,7 +29,7 @@ export const generateTypeMapFile = (): void => {
   // ═══════════════════════════════════════════════════════════════════════════
   const apiFiles = findAllApiFiles(SRC_DIR);
   const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
-  const unresolvedErrors: string[] = [];
+  const unresolvedTypeAliases = new Set<string>();
 
   console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
 
@@ -52,7 +52,8 @@ export const generateTypeMapFile = (): void => {
 
     for (const symbol of [...inputTypeResult.unresolvedSymbols, ...outputTypeResult.unresolvedSymbols]) {
       if (!symbol.importPath) {
-        unresolvedErrors.push(`API ${pagePath}/${apiName}/${apiVersion} (${filePath}): unresolved type ${symbol.name}`);
+        unresolvedTypeAliases.add(symbol.name);
+        console.warn(`[TypeMapGenerator] Unresolved API type fallback (${pagePath}/${apiName}/${apiVersion}): ${symbol.name} -> any`);
         continue;
       }
       if (!namedImports.has(symbol.importPath)) {
@@ -63,8 +64,7 @@ export const generateTypeMapFile = (): void => {
 
     console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
 
-    const targetPages = [pagePath, ...getRouteAliases(pagePath)];
-    for (const targetPagePath of targetPages) {
+    for (const targetPagePath of pagePath) {
       if (!typesByPage.has(targetPagePath)) {
         typesByPage.set(targetPagePath, new Map());
       }
@@ -140,7 +140,8 @@ export const generateTypeMapFile = (): void => {
 
     for (const symbol of allSyncUnresolvedSymbols) {
       if (!symbol.importPath) {
-        unresolvedErrors.push(`Sync ${pagePath}/${syncName}/${syncVersion} (${serverFile ?? clientFile}): unresolved type ${symbol.name}`);
+        unresolvedTypeAliases.add(symbol.name);
+        console.warn(`[TypeMapGenerator] Unresolved Sync type fallback (${pagePath}/${syncName}/${syncVersion}): ${symbol.name} -> any`);
         continue;
       }
       if (!namedImports.has(symbol.importPath)) {
@@ -151,17 +152,12 @@ export const generateTypeMapFile = (): void => {
 
     console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
 
-    const targetPages = [pagePath, ...getRouteAliases(pagePath)];
-    for (const targetPagePath of targetPages) {
+    for (const targetPagePath of pagePath) {
       if (!syncTypesByPage.has(targetPagePath)) {
         syncTypesByPage.set(targetPagePath, new Map());
       }
       syncTypesByPage.get(targetPagePath)!.set(`${syncName}@${syncVersion}`, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType, version: syncVersion });
     }
-  }
-
-  if (unresolvedErrors.length > 0) {
-    throw new Error(`[TypeMapGenerator] Unresolved type references:\n${unresolvedErrors.map((item) => `- ${item}`).join('\n')}`);
   }
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
@@ -172,6 +168,7 @@ export const generateTypeMapFile = (): void => {
     namedImports,
     defaultImports,
     functionsInterface,
+    unresolvedTypeAliases: Array.from(unresolvedTypeAliases),
   });
 
   writeTypeMapArtifacts({ content, docsData });

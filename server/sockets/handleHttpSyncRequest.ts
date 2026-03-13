@@ -1,4 +1,3 @@
-import { devSyncs, devFunctions } from "../dev/loader";
 import { syncs, functions } from '../prod/generatedApis';
 import { ioInstance } from "./socket";
 import { getSession } from "../functions/session";
@@ -30,7 +29,20 @@ type HttpSyncResponse = {
   httpStatus?: number;
 };
 
-const functionsObject = process.env.NODE_ENV == 'development' ? devFunctions : functions;
+const getRuntimeSyncMaps = async () => {
+  if (process.env.NODE_ENV !== 'production') {
+    const { devSyncs, devFunctions } = await import('../dev/loader');
+    return {
+      syncObject: devSyncs,
+      functionsObject: devFunctions,
+    };
+  }
+
+  return {
+    syncObject: syncs,
+    functionsObject: functions,
+  };
+};
 
 export default async function handleHttpSyncRequest({
   name,
@@ -107,7 +119,7 @@ export default async function handleHttpSyncRequest({
     });
   }
 
-  const syncObject = process.env.NODE_ENV == 'development' ? devSyncs : syncs;
+  const { syncObject, functionsObject } = await getRuntimeSyncMaps();
   const nameSegments = name.split('/').filter(Boolean);
   const syncBaseName = nameSegments[nameSegments.length - 2];
   const requestedVersion = nameSegments[nameSegments.length - 1];
@@ -183,7 +195,7 @@ export default async function handleHttpSyncRequest({
   if (syncObject[`${resolvedName}_server`]) {
     const { auth, main: serverMain, inputType, inputTypeFilePath } = syncObject[`${resolvedName}_server`];
 
-    const inputValidation = validateInputByType({
+    const inputValidation = await validateInputByType({
       typeText: inputType,
       value: data,
       rootKey: 'clientInput',

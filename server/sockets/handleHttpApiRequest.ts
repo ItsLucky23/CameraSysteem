@@ -1,5 +1,4 @@
 import { apis, functions } from '../prod/generatedApis';
-import { devApis, devFunctions } from '../dev/loader';
 import { getSession } from '../functions/session';
 import config, { SessionLayout } from '../../config';
 import { validateRequest } from '../utils/validateRequest';
@@ -46,6 +45,21 @@ interface HttpApiRequestParams {
   /** HTTP method from the request */
   method?: HttpMethod;
 }
+
+const getRuntimeApiMaps = async () => {
+  if (process.env.NODE_ENV !== 'production') {
+    const { devApis, devFunctions } = await import('../dev/loader');
+    return {
+      apisObject: devApis,
+      functionsObject: devFunctions,
+    };
+  }
+
+  return {
+    apisObject: apis,
+    functionsObject: functions,
+  };
+};
 
 type ApiNetworkResponse<T = any> =
   | ({ status: 'success'; httpStatus: number } & T)
@@ -111,8 +125,7 @@ export async function handleHttpApiRequest({
 
   console.log(`http api: ${normalizedName} called`, 'cyan');
 
-  const isDevMode = process.env.NODE_ENV !== 'production';
-  const apisObject = isDevMode ? devApis : apis;
+  const { apisObject, functionsObject } = await getRuntimeApiMaps();
 
   //? Resolve API: try exact match first, then fall back to root-level
   //? e.g. "api/examples/session" → not found → try "api/session"
@@ -143,7 +156,7 @@ export async function handleHttpApiRequest({
   const inputType = apisObject[resolvedName].inputType as string | undefined;
   const inputTypeFilePath = apisObject[resolvedName].inputTypeFilePath as string | undefined;
 
-  const inputValidation = validateInputByType({
+  const inputValidation = await validateInputByType({
     typeText: inputType,
     value: requestData,
     rootKey: 'data',
@@ -253,7 +266,6 @@ export async function handleHttpApiRequest({
   }
 
   // Execute the API handler
-  const functionsObject = isDevMode ? devFunctions : functions;
   const [error, result] = await tryCatch(
     async () => await main({ data: requestData, user, functions: functionsObject })
   );

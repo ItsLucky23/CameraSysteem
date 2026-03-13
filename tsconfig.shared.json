@@ -5,7 +5,7 @@
     "lib": [
       "ES2020",
       "DOM",
-      "DOM.Iterable"
+      "DOM.Iterable",
     ], /* Specify a set of bundled library declaration files that describe the target runtime environment. */
     "module": "ESNext", /* Specify what module code is generated. */
     "skipLibCheck": true, /* Skip type checking all .d.ts files. */
@@ -15,6 +15,7 @@
     "forceConsistentCasingInFileNames": true, /* Ensure that casing is correct in imports. */
     "resolveJsonModule": true, /* Enable importing .json files. */
     "isolatedModules": true, /* Ensure that each file can be safely transpiled without relying on other imports. */
+    "noErrorTruncation": true,
     /* Type Checking */
     "strict": true, /* Enable all strict type-checking options. */
     "noUnusedLocals": true, /* Enable error reporting when a local variables aren't read. */

@@ -1,9 +1,3 @@
-import {
-  getUnresolvedTypeMessage,
-  isUnresolvedTypeMarker,
-  resolveRuntimeTypeText,
-} from './runtimeTypeResolver';
-
 type ValidationResult =
   | { status: 'success' }
   | { status: 'error'; message: string };
@@ -94,8 +88,9 @@ const isPrimitiveType = (type: string): boolean => {
 const validateType = (typeText: string, value: unknown, path: string): ValidationResult => {
   const type = typeText.trim();
 
-  if (isUnresolvedTypeMarker(type)) {
-    return { status: 'error', message: `${path}: ${getUnresolvedTypeMessage(type)}` };
+  if (type.startsWith('__RUNTIME_UNRESOLVED__::')) {
+    const unresolvedMessage = type.replace('__RUNTIME_UNRESOLVED__::', '').trim();
+    return { status: 'error', message: `${path}: ${unresolvedMessage}` };
   }
 
   if (type.startsWith('(') && type.endsWith(')')) {
@@ -206,7 +201,7 @@ const validateType = (typeText: string, value: unknown, path: string): Validatio
   return { status: 'success' };
 };
 
-export const validateInputByType = ({
+export const validateInputByType = async ({
   typeText,
   value,
   rootKey,
@@ -216,10 +211,20 @@ export const validateInputByType = ({
   value: unknown;
   rootKey: string;
   filePath?: string;
-}): ValidationResult => {
+}): Promise<ValidationResult> => {
   if (!typeText || typeText.trim() === '' || typeText.trim() === 'any') {
     return { status: 'success' };
   }
+
+  // Runtime type expansion relies on TypeScript internals and is intended for development.
+  // In production we skip this expensive validation to avoid loading dev-only compiler code.
+  if (process.env.NODE_ENV === 'production') {
+    return { status: 'success' };
+  }
+
+  const {
+    resolveRuntimeTypeText,
+  } = await import('./runtimeTypeResolver');
 
   const resolvedType = resolveRuntimeTypeText({ typeText, filePath });
   if (resolvedType.status === 'error') {
