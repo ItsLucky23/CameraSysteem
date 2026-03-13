@@ -64,12 +64,10 @@ export const generateTypeMapFile = (): void => {
 
     console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
 
-    for (const targetPagePath of pagePath) {
-      if (!typesByPage.has(targetPagePath)) {
-        typesByPage.set(targetPagePath, new Map());
-      }
-      typesByPage.get(targetPagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, method: httpMethod, rateLimit, auth, version: apiVersion });
+    if (!typesByPage.has(pagePath)) {
+      typesByPage.set(pagePath, new Map());
     }
+    typesByPage.get(pagePath)!.set(`${apiName}@${apiVersion}`, { input: inputType, output: outputType, method: httpMethod, rateLimit, auth, version: apiVersion });
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -152,12 +150,10 @@ export const generateTypeMapFile = (): void => {
 
     console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
 
-    for (const targetPagePath of pagePath) {
-      if (!syncTypesByPage.has(targetPagePath)) {
-        syncTypesByPage.set(targetPagePath, new Map());
-      }
-      syncTypesByPage.get(targetPagePath)!.set(`${syncName}@${syncVersion}`, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType, version: syncVersion });
+    if (!syncTypesByPage.has(pagePath)) {
+      syncTypesByPage.set(pagePath, new Map());
     }
+    syncTypesByPage.get(pagePath)!.set(`${syncName}@${syncVersion}`, { clientInput: clientInputType, serverOutput: serverOutputType, clientOutput: clientOutputType, version: syncVersion });
   }
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });

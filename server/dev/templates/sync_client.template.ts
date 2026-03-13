@@ -1,6 +1,4 @@
 //@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
-import { SessionLayout } from '{{REL_PATH}}config';
-//@ts-expect-error We replace {{REL_PATH}} with the relative path to the project root
 import { Functions, SyncClientResponse } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 
@@ -13,19 +11,21 @@ export interface SyncParams {
     // Define the data shape returned from the server e.g.
     // message: string;
   };
-  user: SessionLayout; // session data from any user that is in the room
+  token: string | null; // target client's session token (fetch session only when needed)
   functions: Functions; // contains all functions that are available on the server in the functions folder
   roomCode: string; // room code
 }
 
 export const main = async ({  }: SyncParams): Promise<SyncClientResponse> => {
   // THIS FILE RUNS ON THE SERVER AND IT EXECUTES FOR EVERY CLIENT THAT IS IN THE GIVEN ROOM
+  // Use functions.session.getSession(token) when you need session data for this target client.
 
   // Return { status: 'error', message: '...' } OR { status: 'error', errorCode: '...' }
   // Returning error here only affects the current target client and does not stop other clients.
 
   // Example: Only allow users on set page to receive the event
-  // if (user?.location?.pathName === '/your-page') {
+  // const targetUser = token ? await functions.session.getSession(token) : null;
+  // if (targetUser?.location?.pathName === '/your-page') {
   //   return { status: 'success' };
   // }
 

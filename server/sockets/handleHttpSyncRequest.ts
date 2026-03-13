@@ -282,14 +282,13 @@ export default async function handleHttpSyncRequest({
     if (!tempSocket) continue;
 
     const tempToken = extractTokenFromSocket(tempSocket);
-    const targetUser = await getSession(tempToken);
 
     if (ignoreSelf && token && token === tempToken) {
       continue;
     }
 
     if (syncObject[`${resolvedName}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, user: targetUser, functions: functionsObject, serverOutput, roomCode: receiver }));
+      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }));
       if (clientSyncError) {
         tempSocket.emit('sync', {
           cb: callbackName,
@@ -297,7 +296,6 @@ export default async function handleHttpSyncRequest({
           ...buildSyncError({
             response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
             preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-            userLanguage: targetUser?.language,
           }),
         });
         continue;
@@ -310,7 +308,6 @@ export default async function handleHttpSyncRequest({
           ...buildSyncError({
             response: ensureSyncErrorShape(clientSyncResult),
             preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-            userLanguage: targetUser?.language,
           }),
         });
         continue;
@@ -323,7 +320,6 @@ export default async function handleHttpSyncRequest({
           ...buildSyncError({
             response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
             preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-            userLanguage: targetUser?.language,
           }),
         });
         continue;

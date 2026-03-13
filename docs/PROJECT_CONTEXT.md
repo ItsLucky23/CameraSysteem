@@ -89,6 +89,7 @@ Handles all real-time communication:
 
 - Validates server-side sync file before broadcasting
 - Loops through all sockets in the room and runs client-side sync for each
+- Passes target `token` to `_client.ts` instead of auto-loading each target session
 - Supports `ignoreSelf` to exclude sender from receiving the event
 
 ### `server/functions/` - Server Utilities
@@ -329,6 +330,7 @@ Pages export a `template` constant to specify their wrapper:
 - `src/{page}/_sync/{name}_server.ts` - Runs on server for validation, returns `serverOutput`
 - `src/{page}/_sync/{name}_client.ts` - Runs on receiving clients, returns `clientOutput`
 - Both files use `clientInput` in SyncParams for the original sender's data
+- Client sync handlers receive `token` and can call `functions.session.getSession(token)` only when session data is needed
 - Call from client: `syncRequest({ name: '{name}', data: clientInput, receiver: 'room-code' })`
 
 ---

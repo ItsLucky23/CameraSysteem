@@ -105,7 +105,6 @@ export const main = async ({
 ### 2. Client handler (optional)
 
 ```typescript
-import { SessionLayout } from "../../../config";
 import {
   Functions,
   SyncClientResponse,
@@ -121,22 +120,23 @@ export interface SyncParams {
 
   serverOutput: SyncServerOutput<PagePath, SyncName>;
   // Note: No serverOutput in client-only syncs (no _server.ts file)
-  user: SessionLayout; // session data from any user that is in the room
+  token: string | null; // target client token (fetch session only when needed)
   functions: Functions; // contains functions available from server/functions
   roomCode: string; // room code
 }
 
 export const main = async ({
-  user,
+  token,
   clientInput,
   serverOutput,
   functions,
   roomCode,
 }: SyncParams): Promise<SyncClientResponse> => {
   // CLIENT FILTER/RULE STAGE: runs on server for each target client in the room
+  const targetUser = token ? await functions.session.getSession(token) : null;
 
   // Example: Only allow users on set page to receive the event
-  // if (user?.location?.pathName === '/your-page') {
+  // if (targetUser?.location?.pathName === '/your-page') {
   //   return { status: 'success' };
   // }
 
@@ -146,6 +146,8 @@ export const main = async ({
   };
 };
 ```
+
+Client sync handlers no longer receive `user` automatically. This avoids a Redis session lookup for every target socket. When you need target session data, call `functions.session.getSession(token)` inside `_client.ts`.
 
 ## Receiving Sync Events
 

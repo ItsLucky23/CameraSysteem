@@ -305,9 +305,6 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     //? check if they have a token stored in their cookie or session based on the settings
     const tempToken = extractTokenFromSocket(tempSocket);
 
-    //? here we get the users session of the client and run the sync function with the data and the users session data
-    const user = await getSession(tempToken);
-
     if (ignoreSelf && typeof ignoreSelf == 'boolean') {
       if (token == tempToken) {
         continue;
@@ -315,7 +312,7 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     if (syncObject[`${resolvedName}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, user, functions: functionsObject, serverOutput, roomCode: receiver }));
+      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }));
       if (clientSyncError) {
         tempSocket.emit(`sync`, {
           cb,
@@ -325,7 +322,6 @@ export default async function handleSyncRequest({ msg, socket, token }: {
             preferred:
               extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
               || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
-            userLanguage: user?.language,
           }),
         });
         continue;
@@ -339,7 +335,6 @@ export default async function handleSyncRequest({ msg, socket, token }: {
             preferred:
               extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
               || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
-            userLanguage: user?.language,
           }),
         });
         continue;
@@ -353,7 +348,6 @@ export default async function handleSyncRequest({ msg, socket, token }: {
             preferred:
               extractLanguageFromHeader(tempSocket.handshake.headers['x-language'])
               || extractLanguageFromHeader(tempSocket.handshake.headers['accept-language']),
-            userLanguage: user?.language,
           }),
         });
         continue;

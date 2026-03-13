@@ -257,10 +257,10 @@ Client calls syncRequest({ name: 'test/nestedTest/room', version: 'v1', ... })
 4. Get all sockets in the target room
    |
 5. For each socket in room:
-   |  a. Get that user's session
-   |  b. If ignoreSelf and it's the sender, skip
+  |  a. Resolve target token from socket
+  |  b. If ignoreSelf and it's the sender, skip
   |  c. If _client.ts exists:
-   |     - Run main() with { clientInput, serverOutput, user, functions, roomCode }
+  |     - Run main() with { clientInput, serverOutput, token, functions, roomCode }
   |     - If returns { status: 'error' }, emit error to this client and continue
    |     - If returns { status: 'success' }, emit to this client
    |  d. If no _client.ts, emit serverOutput directly
@@ -301,7 +301,7 @@ export const main = async ({
 export interface SyncParams {
   clientInput: SyncClientInput<PagePath, SyncName>;
   serverOutput: SyncServerOutput<PagePath, SyncName>;
-  user: SessionLayout;
+  token: string | null;
   functions: Functions;
   roomCode: string;
 }
@@ -309,10 +309,11 @@ export interface SyncParams {
 export const main = async ({
   clientInput,
   serverOutput,
-  user,
+  token,
   functions,
   roomCode,
 }: SyncParams): Promise<SyncClientResponse> => {
+  const targetUser = token ? await functions.session.getSession(token) : null;
   // Filter: return error to skip this client, success to deliver
   return { status: "success" /* additional client-specific data */ };
 };
