@@ -1,7 +1,7 @@
 # LuckyStack - AI Development Rules
 
 > These rules are automatically loaded by Claude Code on every prompt.
-> Last updated: 2026-02-10
+> Last updated: 2026-03-13
 
 ---
 
@@ -97,6 +97,50 @@
 ### 14. Keep Design Updated
 
 - when updating files that are listed in the .gitignore check if there is a template file for it and update that too. (e.g. .env -> envTemplate.txt or config.ts -> configTemplate.txt)
+
+### 15. Type Generation and Template Injection Contract
+
+- This file (`CLAUDE.md`) is the authoritative AI behavior contract for this repository.
+- If AI adapter docs are added later (for example `copilot-instructions.md`, `AGENTS.md`, or mode-specific files), keep them thin and reference this contract instead of duplicating policy text.
+- Preferred direction: rely on route literals + generated maps + inferred `serverOutput`/`clientOutput` typing.
+- Avoid introducing local unsafe wrappers around `apiRequest`, `syncRequest`, or sync callback payloads (`unknown`/`any` narrowing layers) unless there is a proven temporary blocker.
+- This is guidance for AI behavior, not a hard lint policy.
+
+Timing-aware AI workflow:
+
+1. First pass: implement against the intended typed API/sync contract and trust server/client payload shapes.
+2. Wait/re-check pass: after generation settles, re-open generated types and remove temporary casts/narrowing if they are no longer needed.
+3. Keep temporary exceptions small and local, then clean them up in the same change window whenever possible.
+
+Good vs bad examples (docs-only):
+
+```typescript
+// Bad: local unsafe wrapper erases route/version typing
+const unsafeApi = async (name: string, version: string, data: unknown): Promise<any> =>
+  apiRequest({ name: name as any, version: version as any, data: data as any });
+
+// Good: direct typed call with route/version literals
+const response = await apiRequest({
+  name: "examples/getUserData",
+  version: "v1",
+  data: { userId: "123" },
+});
+
+// Good: typed sync callback payload usage
+upsertSyncEventCallback({
+  name: "examples/updateCounter",
+  version: "v1",
+  callback: ({ serverOutput, clientOutput }) => {
+    console.log(serverOutput, clientOutput);
+  },
+});
+```
+
+AI self-check before finalizing changes:
+
+- Did I rely on generated route/version types?
+- Did I avoid adding new unsafe wrappers?
+- If I used a temporary cast during generation lag, did I re-check and remove it after types refreshed?
 ---
 
 ## Project Structure

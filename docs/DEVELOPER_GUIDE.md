@@ -171,7 +171,14 @@ The dev server watches for file changes and automatically:
 3. **Function files** (`server/functions/*.ts`, `shared/*.ts`) - Reloads functions and regenerates `apiTypes.generated.ts`
 4. **Components** - Vite HMR handles the rest
 
-Just save and your types are updated!
+Type regeneration is asynchronous and can lag briefly (usually hundreds of milliseconds).
+
+Timing-aware workflow:
+
+1. First pass: write against intended route literals and generated helper contracts.
+2. Wait/re-check pass: after generation settles, remove any temporary casts/narrowing added during the lag window.
+
+Just save and your types are updated.
 
 ---
 

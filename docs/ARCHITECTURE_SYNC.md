@@ -246,6 +246,56 @@ Generated sync output typing preserves direct literal return values in object pr
 
 ---
 
+## Type Generation Pipeline (Timing-Aware)
+
+In development, sync typing updates follow this sequence:
+
+1. File save
+2. Template injection (if applicable, only for new empty files in `_sync/`)
+3. Hot reload trigger
+4. Type-map regeneration
+5. Typed helpers become accurate (`syncRequest`, callback payload inference for `serverOutput`/`clientOutput`)
+
+Regeneration is asynchronous. After a save, there can be a short lag (typically hundreds of milliseconds) before generated helper types fully reflect the latest sync file state.
+
+## Timing-Aware AI Workflow
+
+Use a trust-first workflow for sync edits:
+
+1. First pass: implement using the intended typed sync contract and trust server/client payload shapes.
+2. Wait/re-check pass: after generation settles, re-open generated types and remove temporary casts/narrowing if no longer needed.
+
+This avoids premature unsafe rewrites while the generator is still catching up.
+
+Temporary exception note:
+
+- If a short generator-lag window forces a cast, keep it local and minimal, then remove it once types refresh.
+
+Good vs bad examples:
+
+```typescript
+// Bad: local wrapper erases sync route typing and callback payload inference
+const onSyncLoose = (name: string, cb: (payload: any) => void) =>
+  upsertSyncEventCallback({ name: name as any, version: "v1" as any, callback: cb as any });
+
+// Good: direct typed callback payload usage
+upsertSyncEventCallback({
+  name: "examples/updateCounter",
+  version: "v1",
+  callback: ({ serverOutput, clientOutput }) => {
+    console.log(serverOutput, clientOutput);
+  },
+});
+```
+
+AI self-check before finalizing changes:
+
+- Did I rely on generated route/version types?
+- Did I avoid adding new unsafe wrappers?
+- If I used a temporary cast during generation lag, did I re-check and remove it after types refreshed?
+
+---
+
 ## Runtime Function Reference
 
 | File | Function | Purpose |

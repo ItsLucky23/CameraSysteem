@@ -71,7 +71,7 @@ type SyncParamsForFullName<
 // Sync Event Callbacks Registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any; aditionalData: any }) => void)> = {};
+const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any }) => void)> = {};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // syncRequest Function Overloads
@@ -216,7 +216,7 @@ export const useSyncEvents = () => {
 
 export const useSyncEventTrigger = () => {
 
-  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}, aditionalData: any = {}) => {
+  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}) => {
     const cb = syncEvents[name];
     if (!cb) {
       if (dev) {
@@ -227,7 +227,7 @@ export const useSyncEventTrigger = () => {
       return;
     }
     if (typeof cb == 'function') {
-      cb({ clientOutput, serverOutput, aditionalData });
+      cb({ clientOutput, serverOutput });
     }
   }
 

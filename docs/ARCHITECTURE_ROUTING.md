@@ -346,6 +346,31 @@ upsertSyncEventCallback({
 
 ---
 
+## Template Injection and Generated Type Maps
+
+Template injection is a development scaffold step, not the long-term type source of truth.
+
+### Filename conventions that control injector behavior
+
+- API files must end with `_v{number}.ts` (example: `getUser_v1.ts`)
+- Sync files must end with `_server_v{number}.ts` or `_client_v{number}.ts`
+- Invalid names get a guidance template instead of route registration
+
+### Paired sync behavior
+
+- Adding a new empty `_sync/*_client_v{n}.ts` while `_server_v{n}.ts` exists injects a paired client template that references generated sync types.
+- Adding a new empty `_sync/*_server_v{n}.ts` while `_client_v{n}.ts` exists can migrate client input typing into the server scaffold, then update the client to use generated `SyncClientInput`/`SyncServerOutput` references.
+- Deleting `_server_v{n}.ts` while `_client_v{n}.ts` remains can rewrite client typing to preserve standalone behavior.
+
+Because this runs on file events, types may appear/disappear briefly as files are added/removed before regeneration settles.
+
+### Source of truth
+
+- Template output is scaffolding for fast authoring.
+- Generated type maps (`src/_sockets/apiTypes.generated.ts`) are the contract source of truth for request/response typing.
+
+---
+
 ## Private Folders
 
 Any folder prefixed with `_` is private and excluded from routing:
