@@ -74,10 +74,10 @@ export function useUpdateLanguage() {
 // helper function for dynamic translation
 export function translate({ translationList, key, params }: {
   translationList: TranslationRecord,
-  key: string,
+  key: unknown,
   params?: { key: string, value: string | number | boolean }[]
 }): string {
-  if (!key) return "";
+  if (typeof key !== "string" || key.length === 0) return "";
   
   const parts = key.split(".");
   let result: unknown = translationList;
@@ -91,7 +91,7 @@ export function translate({ translationList, key, params }: {
   }
   
   if (typeof result !== "string") return key;
-  if (!params) return result;
+  if (!Array.isArray(params) || params.length === 0) return result;
 
   let finalResult = result;
   for (const param of params) {
