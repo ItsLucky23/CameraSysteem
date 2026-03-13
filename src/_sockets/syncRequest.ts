@@ -2,7 +2,7 @@ import { dev, SessionLayout } from "config";
 import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import { statusContent } from "src/_providers/socketStatusProvider";
-import { Dispatch, RefObject, SetStateAction } from "react";
+import { Dispatch, RefObject, SetStateAction, useCallback } from "react";
 import { enqueueSyncRequest, isOnline } from "./offlineQueue";
 import type {
   SyncTypeMap
@@ -71,7 +71,7 @@ type SyncParamsForFullName<
 // Sync Event Callbacks Registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any }) => void)> = {};
+const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any }) => void)[]> = {};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // syncRequest Function Overloads
@@ -117,7 +117,7 @@ export function syncRequest(params: any): Promise<boolean> {
     if (!await waitForSocket()) { return resolve(false); }
     if (!socket) { return resolve(false); }
 
-    name = name.replace(/^\/+|\/+$/g, '');
+    name = name.replaceAll(/^\/+|\/+$/g, '');
     const fullName = `sync/${name}/${version}`;
     let queueId: string | null = null;
 
@@ -142,7 +142,7 @@ export function syncRequest(params: any): Promise<boolean> {
 
       const tempIndex = incrementResponseIndex();
 
-      if (dev) { console.log(`Client Sync Request: `, { name, data, receiver, ignoreSelf }) }
+      if (dev) { console.log(`Client Sync Request:`, { name, data, receiver, ignoreSelf }) }
 
       socketInstance.emit('sync', { name: fullName, data, cb: `${name}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
 
@@ -178,16 +178,16 @@ export const useSyncEvents = () => {
     callback: (params: TypedCallbackParams<F, V>) => void;
   };
 
-  function upsertSyncEventCallback<F extends SyncFullName, V extends VersionsForFullName<F>>(
+  const upsertSyncEventCallback = useCallback(<F extends SyncFullName, V extends VersionsForFullName<F>>(
     params: UpsertParams<F, V>
-  ): void {
+  ): (() => void) => {
 
     if (!params.name || typeof params.name !== 'string') {
       if (dev) {
         console.error("Invalid name for upsertSyncEventCallback");
         toast.error("Invalid name for upsertSyncEventCallback");
       }
-      return;
+      return () => { return; };
     }
 
     if (!params.version || typeof params.version !== 'string') {
@@ -195,7 +195,7 @@ export const useSyncEvents = () => {
         console.error("Invalid version for upsertSyncEventCallback");
         toast.error("Invalid version for upsertSyncEventCallback");
       }
-      return;
+      return () => { return; };
     }
 
     if (typeof params.callback !== 'function') {
@@ -203,13 +203,25 @@ export const useSyncEvents = () => {
         console.error("Invalid callback for upsertSyncEventCallback");
         toast.error("Invalid callback for upsertSyncEventCallback");
       }
-      return;
+      return () => { return; };
     }
 
-    const sanitizedName = params.name.replace(/^\/+|\/+$/g, '');
+    const sanitizedName = params.name.replaceAll(/^\/+|\/+$/g, '');
     const fullName = `sync/${sanitizedName}/${params.version}`;
-    syncEvents[fullName] = params.callback;
-  }
+    const callbacks = syncEvents[fullName] ?? [];
+    const callback = params.callback as (params: { clientOutput: any; serverOutput: any; aditionalData?: any }) => void;
+    callbacks.push(callback);
+    syncEvents[fullName] = callbacks;
+
+    return () => {
+      const current = syncEvents[fullName];
+      if (!current) return;
+      syncEvents[fullName] = current.filter((cb) => cb !== callback);
+      if (syncEvents[fullName].length === 0) {
+        delete syncEvents[fullName];
+      }
+    };
+  }, []);
 
   return { upsertSyncEventCallback };
 }
@@ -217,17 +229,18 @@ export const useSyncEvents = () => {
 export const useSyncEventTrigger = () => {
 
   const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}) => {
-    const cb = syncEvents[name];
-    if (!cb) {
+    const callbacks = syncEvents[name];
+    if (!callbacks || callbacks.length === 0) {
       if (dev) {
-        console.log(syncEvents)
-        console.error(`Sync event ${name} not found`);
-        toast.error(`Sync event ${name} not found`);
+        console.warn(`Sync event ${name} has no registered callback on this page`);
       }
       return;
     }
-    if (typeof cb == 'function') {
-      cb({ clientOutput, serverOutput });
+    
+    for (const cb of callbacks) {
+      if (typeof cb === 'function') {
+        cb({ clientOutput, serverOutput });
+      }
     }
   }
 
@@ -318,14 +331,13 @@ export const initSyncRequest = async ({
   socket.on("userBack", ({ userId }) => {
     console.log("userBack", { userId });
 
-    setSocketStatus(prev => {
-      const newStatus = { ...prev };
-      newStatus[userId] = {
+    setSocketStatus(prev => ({
+      ...prev,
+      [userId]: {
         status: "CONNECTED",
         endTime: undefined,
-      };
-      return newStatus;
-    });
+      }
+    }));
   });
 
   socket.on("connect_error", (err) => {
