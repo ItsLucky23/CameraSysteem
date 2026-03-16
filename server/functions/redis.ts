@@ -1,7 +1,8 @@
 import Redis from 'ioredis';
 import dotenv from 'dotenv';
 
-dotenv.config(); 
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 
 //? here we create a Redis instance
 const redis = new Redis({

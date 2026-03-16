@@ -2,7 +2,8 @@ import dotenv from 'dotenv';
 import { initializeSentry } from './functions/sentry';
 import path from 'path';
 
-dotenv.config({ path: [".env.local", ".env"] });
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 initializeSentry();
 
 import http from 'http';

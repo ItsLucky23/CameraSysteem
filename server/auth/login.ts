@@ -15,7 +15,8 @@ import tryCatch from '../../shared/tryCatch';
 import { UPLOADS_DIR } from '../utils/paths';
 import redis from '../functions/redis';
 
-dotenv.config();
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 
 type paramsType = {
   email?: string,

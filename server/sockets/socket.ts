@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 
 import handleApiRequest from "./handleApiRequest";
 import { getSession, saveSession } from "../functions/session";

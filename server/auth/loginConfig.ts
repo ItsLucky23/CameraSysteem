@@ -1,7 +1,8 @@
 import dotenv from 'dotenv';
 import tryCatch from '../../shared/tryCatch';
 
-dotenv.config({ path: ['.env.local', '.env'] });
+dotenv.config({ path: '.env' });
+dotenv.config({ path: '.env.local', override: true });
 
 interface BasicProvider {
   name: string;
