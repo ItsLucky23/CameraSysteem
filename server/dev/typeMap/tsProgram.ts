@@ -296,8 +296,11 @@ export const expandTypeDetailed = (
         const typeArgs = checker.getTypeArguments(refType);
         if (typeArgs.length > 0) {
           const expanded = expandTypeDetailed(typeArgs[0], checker, depth + 1, expandState);
+          const elementType = /\s[|&]\s/.test(expanded.text)
+            ? `(${expanded.text})`
+            : expanded.text;
           return {
-            text: `${expanded.text}[]`,
+            text: `${elementType}[]`,
             unresolvedSymbols: expanded.unresolvedSymbols,
           };
         }
