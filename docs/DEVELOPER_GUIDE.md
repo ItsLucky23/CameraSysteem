@@ -174,7 +174,7 @@ The dev server watches for file changes and automatically:
 For direct `_api` and `_sync` edits, the watcher reloads only the changed route module in memory.
 Type-map regeneration for route files runs on add/delete events, not on every save.
 
-For non-route dependencies in `src/` (files outside `_api`/`_sync`), the watcher still does a full API/sync reload so imports remain consistent.
+For non-route dependencies in `src/`, `shared/`, and `server/functions/`, the watcher computes affected imports and reloads only dependent API/sync routes.
 
 Type regeneration is asynchronous and can lag briefly (usually hundreds of milliseconds).
 

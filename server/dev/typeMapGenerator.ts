@@ -18,7 +18,12 @@ import { SRC_DIR } from '../utils/paths';
 const namedImports = new Map<string, Set<string>>();
 const defaultImports = new Map<string, string>();
 
-export const generateTypeMapFile = (): void => {
+interface GenerateTypeMapOptions {
+  quiet?: boolean;
+}
+
+export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
+  const { quiet = false } = options;
   // Rebuild the TypeScript Program on each generation to pick up file changes.
   invalidateProgramCache();
   namedImports.clear();
@@ -31,7 +36,9 @@ export const generateTypeMapFile = (): void => {
   const typesByPage = new Map<string, Map<string, { input: string; output: string; method: HttpMethod; rateLimit: number | false | undefined; auth: any; version: string; description?: string }>>();
   const unresolvedTypeAliases = new Set<string>();
 
-  console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
+  if (!quiet) {
+    console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
+  }
 
   for (const filePath of apiFiles) {
     const pagePath = extractPagePath(filePath);
@@ -62,7 +69,9 @@ export const generateTypeMapFile = (): void => {
       namedImports.get(symbol.importPath)!.add(symbol.name);
     }
 
-    console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
+    if (!quiet) {
+      console.log(`[TypeMapGenerator] API: ${pagePath}/${apiName}/${apiVersion} (${httpMethod}${rateLimit !== undefined ? `, rateLimit: ${rateLimit}` : ''})`);
+    }
 
     if (!typesByPage.has(pagePath)) {
       typesByPage.set(pagePath, new Map());
@@ -77,7 +86,9 @@ export const generateTypeMapFile = (): void => {
   const syncClientFiles = findAllSyncClientFiles(SRC_DIR);
   const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; version: string }>>();
 
-  console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`);
+  if (!quiet) {
+    console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`);
+  }
 
   const allSyncs = new Map<string, {
     pagePath: string;
@@ -148,7 +159,9 @@ export const generateTypeMapFile = (): void => {
       namedImports.get(symbol.importPath)!.add(symbol.name);
     }
 
-    console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
+    if (!quiet) {
+      console.log(`[TypeMapGenerator] Sync: ${pagePath}/${syncName}/${syncVersion} (server: ${!!serverFile}, client: ${!!clientFile})`);
+    }
 
     if (!syncTypesByPage.has(pagePath)) {
       syncTypesByPage.set(pagePath, new Map());

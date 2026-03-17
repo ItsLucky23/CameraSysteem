@@ -3,9 +3,7 @@ import fs from "fs";
 import path from 'path';
 import { createRequire } from 'module';
 import {
-  initializeApis,
   initializeFunctions,
-  initializeSyncs,
   upsertApiFromFile,
   removeApiFromFile,
   upsertSyncFromFile,
@@ -28,6 +26,7 @@ import {
 import {
   generateTypeMapFile,
 } from "./typeMapGenerator.js";
+import { findDependentRouteFiles } from "./importDependencyGraph";
 import tryCatch from "../functions/tryCatch";
 import { reloadLocaleTranslations } from "../utils/responseNormalizer";
 
@@ -56,11 +55,6 @@ export const setupWatchers = () => {
     }
   };
 
-  const clearSrcCache = () => {
-    const srcNeedle = `${path.sep}src${path.sep}`.replace(/\\/g, '/');
-    clearModuleCache([srcNeedle]);
-  };
-
   const isRouteDependencyFile = (normalizedPath: string): boolean => {
     if (!normalizedPath.endsWith('.ts') && !normalizedPath.endsWith('.tsx')) {
       return false;
@@ -79,6 +73,54 @@ export const setupWatchers = () => {
     }
 
     return true;
+  };
+
+  const isSharedDependencyFile = (normalizedPath: string): boolean => {
+    return (normalizedPath.includes('/shared/') || normalizedPath.includes('/server/functions/'))
+      && (normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'));
+  };
+
+  const enqueueAffectedRoutesFromDependency = (changedPath: string) => {
+    const affectedRoutes = findDependentRouteFiles(changedPath);
+
+    if (affectedRoutes.size === 0) {
+      console.log(`[HotReload] No API/Sync routes depend on: ${changedPath}`, 'yellow');
+      return;
+    }
+
+    clearModuleCache([changedPath]);
+
+    let queuedApiCount = 0;
+    let queuedSyncCount = 0;
+
+    for (const routePath of affectedRoutes) {
+      if (routePath.includes('/_api/')) {
+        pendingApiDeletes.delete(routePath);
+        pendingApiUpserts.add(routePath);
+        queuedApiCount += 1;
+      } else if (routePath.includes('/_sync/')) {
+        pendingSyncDeletes.delete(routePath);
+        pendingSyncUpserts.add(routePath);
+        queuedSyncCount += 1;
+      }
+    }
+
+    console.log(
+      `[HotReload] Dependency changed: ${changedPath} -> queued ${queuedApiCount} API and ${queuedSyncCount} Sync route reloads`,
+      'blue'
+    );
+
+    if (queuedApiCount > 0) {
+      scheduleReload('api', async () => {
+        await processPendingApiChanges();
+      });
+    }
+
+    if (queuedSyncCount > 0) {
+      scheduleReload('sync', async () => {
+        await processPendingSyncChanges();
+      });
+    }
   };
 
   const isGeneratedPath = (normalizedPath: string): boolean => {
@@ -137,10 +179,11 @@ export const setupWatchers = () => {
             // Inject server template with pre-filled clientInput from client
             await injectServerTemplateWithClientInput(path, clientInputTypes);
             // Regenerate types
-            await tryCatch(generateTypeMapFile);
+            await tryCatch(() => generateTypeMapFile({ quiet: true }));
             // Update client file to use imported types + add serverOutput
             await updateClientFileForPairedServer(clientPath);
-            initializeSyncs();
+            await upsertSyncFromFile(path);
+            await upsertSyncFromFile(clientPath);
             return;
           }
         }
@@ -185,7 +228,7 @@ export const setupWatchers = () => {
 
     if (regenerateTypeMap) {
       console.log(`[HotReload] API routes changed (add/delete), regenerating type map`, 'blue');
-      await tryCatch(generateTypeMapFile);
+      await tryCatch(() => generateTypeMapFile({ quiet: true }));
     }
 
     for (const deletePath of deletePaths) {
@@ -207,7 +250,7 @@ export const setupWatchers = () => {
 
     if (regenerateTypeMap) {
       console.log(`[HotReload] Sync routes changed (add/delete), regenerating type map`, 'blue');
-      await tryCatch(generateTypeMapFile);
+      await tryCatch(() => generateTypeMapFile({ quiet: true }));
     }
 
     for (const deletePath of deletePaths) {
@@ -242,37 +285,37 @@ export const setupWatchers = () => {
       return;
     }
 
+    if (isRouteDependencyFile(normalizedPath)) {
+      scheduleReload('typemap', async () => {
+        console.log(`[HotReload] Route dependency changed, regenerating type map`, 'blue');
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      });
+      enqueueAffectedRoutesFromDependency(normalizedPath);
+      return;
+    }
+
     if (isTypeMapRelevantFile(normalizedPath)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Route dependency changed, regenerating type map`, 'blue');
-        await tryCatch(generateTypeMapFile);
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
       });
     }
 
     if (normalizedPath.includes('_api/')) {
+      scheduleReload('typemap', async () => {
+        console.log(`[HotReload] API changed, regenerating type map`, 'blue');
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      });
       pendingApiDeletes.delete(normalizedPath);
       pendingApiUpserts.add(normalizedPath);
       scheduleReload('api', async () => {
         await processPendingApiChanges();
       });
-    } else if (isRouteDependencyFile(normalizedPath)) {
-      pendingApiDeletes.clear();
-      pendingApiUpserts.clear();
-      pendingSyncDeletes.clear();
-      pendingSyncUpserts.clear();
-
-      scheduleReload('api', async () => {
-        clearSrcCache();
-        console.log(`[HotReload] Route dependency changed, reloading all APIs`, 'blue');
-        await initializeApis();
-      });
-
-      scheduleReload('sync', async () => {
-        clearSrcCache();
-        console.log(`[HotReload] Route dependency changed, reloading all Syncs`, 'blue');
-        await initializeSyncs();
-      });
     } else if (normalizedPath.includes('_sync/')) {
+      scheduleReload('typemap', async () => {
+        console.log(`[HotReload] Sync changed, regenerating type map`, 'blue');
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      });
       pendingSyncDeletes.delete(normalizedPath);
       pendingSyncUpserts.add(normalizedPath);
       scheduleReload('sync', async () => {
@@ -281,11 +324,17 @@ export const setupWatchers = () => {
     }
   };
 
-  const handleFunctionChange = (_path: string) => {
+  const handleFunctionChange = (changedPath: string) => {
+    const normalizedPath = normalizeFsPath(changedPath);
+
     scheduleReload('functions', async () => {
-      await tryCatch(generateTypeMapFile);
+      await tryCatch(() => generateTypeMapFile({ quiet: true }));
       await initializeFunctions();
     });
+
+    if (isSharedDependencyFile(normalizedPath)) {
+      enqueueAffectedRoutesFromDependency(normalizedPath);
+    }
   };
 
   const handleDelete = async (path: string) => {
@@ -302,37 +351,37 @@ export const setupWatchers = () => {
       return;
     }
 
+    if (isRouteDependencyFile(normalizedPath)) {
+      scheduleReload('typemap', async () => {
+        console.log(`[HotReload] Route dependency deleted, regenerating type map`, 'blue');
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      });
+      enqueueAffectedRoutesFromDependency(normalizedPath);
+      return;
+    }
+
     if (isTypeMapRelevantFile(normalizedPath)) {
       scheduleReload('typemap', async () => {
         console.log(`[HotReload] Route dependency deleted, regenerating type map`, 'blue');
-        await tryCatch(generateTypeMapFile);
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
       });
     }
 
     if (normalizedPath.includes('_api/')) {
+      scheduleReload('typemap', async () => {
+        console.log(`[HotReload] API deleted, regenerating type map`, 'blue');
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      });
       pendingApiUpserts.delete(normalizedPath);
       pendingApiDeletes.add(normalizedPath);
       scheduleReload('api', async () => {
         await processPendingApiChanges();
       });
-    } else if (isRouteDependencyFile(normalizedPath)) {
-      pendingApiDeletes.clear();
-      pendingApiUpserts.clear();
-      pendingSyncDeletes.clear();
-      pendingSyncUpserts.clear();
-
-      scheduleReload('api', async () => {
-        clearSrcCache();
-        console.log(`[HotReload] Route dependency deleted, reloading all APIs`, 'blue');
-        await initializeApis();
-      });
-
-      scheduleReload('sync', async () => {
-        clearSrcCache();
-        console.log(`[HotReload] Route dependency deleted, reloading all Syncs`, 'blue');
-        await initializeSyncs();
-      });
     } else if (normalizedPath.includes('_sync/')) {
+      scheduleReload('typemap', async () => {
+        console.log(`[HotReload] Sync deleted, regenerating type map`, 'blue');
+        await tryCatch(() => generateTypeMapFile({ quiet: true }));
+      });
       pendingSyncUpserts.delete(normalizedPath);
       pendingSyncDeletes.add(normalizedPath);
       scheduleReload('sync', async () => {

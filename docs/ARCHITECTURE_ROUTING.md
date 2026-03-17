@@ -228,7 +228,7 @@ At least one of the two files must exist. Both are optional individually.
 **Development:** The server's `dev/loader.ts` scans `src/` recursively and registers files inside `_sync/` that end with `_server.ts` or `_client.ts`.
 After initial load, the dev watcher performs incremental in-memory updates for changed `_sync` files instead of rebuilding the entire sync map on every save.
 
-For non-route dependency changes (for example shared modules under `src/` outside `_api` and `_sync`), the watcher still performs a full API/sync reload because multiple handlers can depend on that module.
+For non-route dependency changes in `src`, `shared`, or `server/functions`, the watcher resolves the dependency graph and reloads only affected API/sync routes in memory.
 
 **Production:** Same build script generates static route maps.
 
