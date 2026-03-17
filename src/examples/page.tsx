@@ -23,14 +23,16 @@ export default function ExamplesPage() {
 
   const { upsertSyncEventCallback } = useSyncEvents();
 
-  upsertSyncEventCallback({
-    name: 'examples/updateCounter',
-    version: 'v1',
-    callback: ({ serverOutput, clientOutput }) => {
-      console.log(clientOutput)
-      setCounter(prev => serverOutput.increase ? prev + 1 : prev - 1);
-    }
-  })
+  useEffect(() => {
+    return upsertSyncEventCallback({
+      name: 'examples/updateCounter',
+      version: 'v1',
+      callback: ({ serverOutput, clientOutput }) => {
+        console.log(clientOutput)
+        setCounter(prev => serverOutput.increase ? prev + 1 : prev - 1);
+      }
+    });
+  }, [upsertSyncEventCallback]);
 
   const logResult = (APINAME: string, result: unknown) => {
     setApiResults(prev => [{ APINAME, result, ts: new Date().toISOString() }, ...prev.slice(0, 4)]);

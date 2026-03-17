@@ -224,6 +224,8 @@ In development, API typing updates follow this sequence:
 
 Regeneration is asynchronous. After a save, there can be a short lag (typically hundreds of milliseconds) before generated helper types fully reflect the latest file changes.
 
+Generation is strict: unresolved API type symbols now fail type-map generation instead of falling back to `any` aliases in generated artifacts.
+
 ## Timing-Aware AI Workflow
 
 Use a trust-first workflow for API edits:
@@ -257,6 +259,9 @@ AI self-check before finalizing changes:
 - Did I rely on generated route/version types?
 - Did I avoid adding new unsafe wrappers?
 - If I used a temporary cast during generation lag, did I re-check and remove it after types refreshed?
+- Did I avoid creating alternate API call signatures (for example local `any` wrappers) that can hide the typed `apiRequest` signature from static analyzers used in AI and CI?
+
+Do not add `unsafe*` wrapper aliases around `apiRequest`. If runtime-dynamic tooling code needs localized assertions, keep them at the call site and avoid hiding helper signatures behind local wrapper types.
 
 ---
 

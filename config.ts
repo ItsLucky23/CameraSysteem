@@ -10,8 +10,8 @@ type AppEnvironmentConfig = {
 const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
-  "http://localhost:5173": {
-    backendUrl: "http://localhost:80",
+  "http://localhost:5174": {
+    backendUrl: "http://localhost:81",
     dev: true,
     sessionBasedToken: true,
     allowMultipleSessions: true
@@ -33,11 +33,11 @@ const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
 const detectedDns = normalizeDns(
   typeof window !== "undefined"
     ? window.location.origin
-    : (process.env.DNS ?? "http://localhost:5173"),
+    : (process.env.DNS ?? "http://localhost:5174"),
 );
 
 const resolvedEnvironment =
-  dnsEnvironmentMap[detectedDns] ?? dnsEnvironmentMap["http://localhost:5173"];
+  dnsEnvironmentMap[detectedDns] ?? dnsEnvironmentMap["http://localhost:5174"];
 
 const config = {
   /** The URL of the backend server. Update for production. */

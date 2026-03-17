@@ -69,6 +69,14 @@ type ApiParamsForFullName<
   ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; }
   : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; };
 
+type RuntimeApiParams = {
+  name?: string;
+  version?: string;
+  data?: unknown;
+  abortable?: boolean;
+  disableErrorMessage?: boolean;
+};
+
 /**
  * Type-safe API request function.
  * 
@@ -85,19 +93,19 @@ type ApiParamsForFullName<
 
 export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<F>>(
   params: ApiParamsForFullName<F, V>
-): Promise<Prettify<OutputForFullName<F, V>>>;
+): Promise<Prettify<OutputForFullName<F, V>>> {
+  type RequestOutput = Prettify<OutputForFullName<F, V>>;
+  const runtimeParams = params as RuntimeApiParams;
+  let { name, version, disableErrorMessage = false } = runtimeParams;
+  let { data } = runtimeParams;
 
-// Implementation (not exposed to TypeScript - only runtime)
-export function apiRequest(params: any): Promise<any> {
-  let { name, version, disableErrorMessage = false } = params;
-  let { data } = params;
-  return new Promise(async (resolve, reject) => {
+  return new Promise<RequestOutput>(async (resolve, reject) => {
     if (!name || typeof name !== "string") {
       if (dev) {
         console.error("Invalid name");
         toast.error("Invalid name");
       }
-      return resolve(null as any);
+      return resolve(null as unknown as RequestOutput);
     }
 
     if (!version || typeof version !== 'string') {
@@ -105,15 +113,15 @@ export function apiRequest(params: any): Promise<any> {
         console.error("Invalid version");
         toast.error("Invalid version");
       }
-      return resolve(null as any);
+      return resolve(null as unknown as RequestOutput);
     }
 
     if (!data || typeof data !== "object") {
-      data = {} as any;
+      data = {};
     }
 
-    if (!await waitForSocket()) { return resolve(null as any); }
-    if (!socket) { return resolve(null as any); }
+    if (!await waitForSocket()) { return resolve(null as unknown as RequestOutput); }
+    if (!socket) { return resolve(null as unknown as RequestOutput); }
 
     name = name.replace(/^\/+|\/+$/g, '');
 
@@ -123,7 +131,7 @@ export function apiRequest(params: any): Promise<any> {
     //? - abortable: undefined → smart default (GET-like APIs get abort controller)
     const terminalName = name.split('/').at(-1) ?? name;
     const isGet = isGetMethod(terminalName as string);
-    const useAbortController = params.abortable === true || isGet;
+    const useAbortController = runtimeParams.abortable === true || isGet;
     const fullname = `api/${name}/${version}`;
 
     let signal: AbortSignal | null = null;
@@ -196,7 +204,7 @@ export function apiRequest(params: any): Promise<any> {
               notify.error({ key: normalizedError.message })
             }
           }
-          return resolve(normalizedError as any)
+          return resolve(normalizedError as unknown as RequestOutput)
         }
 
         if (signal) {
@@ -204,7 +212,7 @@ export function apiRequest(params: any): Promise<any> {
           abortControllers.delete(fullname as string);
         }
 
-        resolve(response as any)
+        resolve(response as RequestOutput)
       });
     };
 

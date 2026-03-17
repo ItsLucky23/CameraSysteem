@@ -146,6 +146,13 @@ export const setupWatchers = () => {
   const handleChange = async (path: string) => {
     const normalizedPath = path.replace(/\\/g, '/');
 
+    if (shouldInjectTemplate(path)) {
+      const injected = await injectTemplate(path);
+      if (injected) {
+        return;
+      }
+    }
+
     if (isGeneratedPath(normalizedPath)) {
       return;
     }

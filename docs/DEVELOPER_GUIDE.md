@@ -180,6 +180,17 @@ Timing-aware workflow:
 
 Just save and your types are updated.
 
+## CI Type Safety
+
+To keep AI tooling, local TypeScript, and CI aligned, always generate artifacts before type-check/build steps in pipelines:
+
+```bash
+npm run generateArtifacts
+tsc -b
+```
+
+The type-map generator is strict: unresolved symbols fail generation instead of emitting `any` fallbacks.
+
 ---
 
 ## Testing APIs
@@ -252,8 +263,9 @@ Errors are automatically captured if `SENTRY_DSN` is set in `.env`.
 1. **Keep APIs small** - One responsibility per file
 2. **Use type inference** - Don't manually type API responses
 3. **Handle errors** - Always return `{ status: 'error', errorCode, errorParams? }` on failure
-4. **Clean up callbacks** - Remove sync callbacks when component unmounts
+4. **Clean up callbacks** - Register sync callbacks inside `useEffect` and return the disposer from `upsertSyncEventCallback`
 5. **Use rooms** - Don't broadcast to everyone, use targeted rooms
+6. **Avoid unsafe wrappers** - Do not create local `unsafe*` wrapper aliases around `apiRequest`, `syncRequest`, or sync callbacks
 
 See architecture deep dives:
 

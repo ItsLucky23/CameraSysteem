@@ -18,8 +18,19 @@ const templatesDir = path.join(__dirname, 'templates');
 
 export const isEmptyFile = (filePath: string): boolean => {
   try {
-    const stats = fs.statSync(filePath);
-    return stats.size === 0;
+    const content = fs.readFileSync(filePath, 'utf-8');
+    return content.trim().length === 0;
+  } catch {
+    return false;
+  }
+};
+
+const isCommentOnlyFile = (filePath: string): boolean => {
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const withoutBlockComments = content.replace(/\/\*[\s\S]*?\*\//g, '');
+    const withoutLineComments = withoutBlockComments.replace(/(^|\s)\/\/.*$/gm, '$1');
+    return withoutLineComments.trim().length === 0;
   } catch {
     return false;
   }
@@ -317,7 +328,11 @@ export const injectTemplate = async (filePath: string): Promise<boolean> => {
 };
 
 export const shouldInjectTemplate = (filePath: string): boolean => {
-  return (isInApiFolder(filePath) || isInSyncFolder(filePath)) && isEmptyFile(filePath);
+  if (!(isInApiFolder(filePath) || isInSyncFolder(filePath))) {
+    return false;
+  }
+
+  return isEmptyFile(filePath) || isCommentOnlyFile(filePath);
 };
 
 /**

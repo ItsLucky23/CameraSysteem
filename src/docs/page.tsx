@@ -59,28 +59,6 @@ interface ParsedObjectField {
 }
 type AdditionalPermission = NonNullable<ApiDoc['auth']['additional']>[number];
 
-type UnsafeUpsertSyncEventCallback = (params: {
-  name: string;
-  version: string;
-  callback: (params: { clientOutput: unknown; serverOutput: unknown }) => void;
-}) => void;
-
-type UnsafeApiRequest = (params: {
-  name: string;
-  version: string;
-  data?: Record<string, unknown>;
-  abortable?: boolean;
-  disableErrorMessage?: boolean;
-}) => Promise<ApiRunResponse>;
-
-type UnsafeSyncRequest = (params: {
-  name: string;
-  version: string;
-  data?: Record<string, unknown>;
-  receiver: string;
-  ignoreSelf?: boolean;
-}) => Promise<boolean>;
-
 const methodBadgeClass = (method: string): string => {
   switch (method.toUpperCase()) {
     case 'GET': {
@@ -433,9 +411,6 @@ const getAdditionalPermissionLabel = (item: AdditionalPermission): string => {
 export default function DocsPage() {
   const translate = useTranslator();
   const { upsertSyncEventCallback } = useSyncEvents();
-  const unsafeUpsertSyncEventCallback = upsertSyncEventCallback as unknown as UnsafeUpsertSyncEventCallback;
-  const unsafeApiRequest = apiRequest as unknown as UnsafeApiRequest;
-  const unsafeSyncRequest = syncRequest as unknown as UnsafeSyncRequest;
   const [docs] = useState<DocsResult | null>(apiDocs as unknown as DocsResult);
   const [selectedApi, setSelectedApi] = useState<ApiDoc | null>(null);
   const [selectedSync, setSelectedSync] = useState<SyncDoc | null>(null);
@@ -464,7 +439,7 @@ export default function DocsPage() {
 
     const name = buildSyncRequestName(selectedSync);
 
-    unsafeUpsertSyncEventCallback({
+    return upsertSyncEventCallback({
       name,
       version: selectedSync.version,
       callback: ({ clientOutput, serverOutput }: { clientOutput: unknown; serverOutput: unknown }) => {
@@ -475,8 +450,8 @@ export default function DocsPage() {
         });
         setStatus('success');
       }
-    });
-  }, [selectedSync, unsafeUpsertSyncEventCallback])
+    } as never);
+  }, [selectedSync, upsertSyncEventCallback])
 
   const normalizeInputData = () => {
     setInputData((previous) => {
@@ -541,12 +516,12 @@ export default function DocsPage() {
     void (async () => {
       try {
         const name = buildApiRequestName(selectedApi);
-        const response = await unsafeApiRequest({
+        const response = await apiRequest({
           name,
           version: selectedApi.version,
           data: parsedInput,
           disableErrorMessage: true,
-        });
+        } as never) as unknown as ApiRunResponse;
 
         setApiResult(response);
         setStatus(response.status === 'success' ? 'success' : 'error');
@@ -621,13 +596,13 @@ export default function DocsPage() {
     const name = buildSyncRequestName(selectedSync);
 
     void (async () => {
-      const success = await unsafeSyncRequest({
+      const success = await syncRequest({
         name,
         version: selectedSync.version,
         data: parsedInput,
         receiver,
         ignoreSelf,
-      });
+      } as never);
 
       if (!success) {
         setSyncResult({

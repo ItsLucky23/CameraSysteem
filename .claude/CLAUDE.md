@@ -104,6 +104,7 @@
 - If AI adapter docs are added later (for example `copilot-instructions.md`, `AGENTS.md`, or mode-specific files), keep them thin and reference this contract instead of duplicating policy text.
 - Preferred direction: rely on route literals + generated maps + inferred `serverOutput`/`clientOutput` typing.
 - Avoid introducing local unsafe wrappers around `apiRequest`, `syncRequest`, or sync callback payloads (`unknown`/`any` narrowing layers) unless there is a proven temporary blocker.
+- Do not introduce `unsafe*` aliases/wrappers for request helpers in app code, docs pages, or examples. If a runtime-dynamic tool path requires looser handling, keep it local to that call site and do not hide helper signatures behind wrapper types.
 - This is guidance for AI behavior, not a hard lint policy.
 
 Timing-aware AI workflow:
@@ -227,6 +228,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
 - `_server.ts` runs once on server for validation
 - `_client.ts` runs on server for each client in the room
+- `_client.ts` does NOT receive `user`; it receives `token` and should call `functions.session.getSession(token)` only when session data is actually needed
 - Client sends: `syncRequest({ name, data, receiver: roomCode, ignoreSelf?: boolean })`
 - Client receives: `upsertSyncEventCallback(name, ({ clientOutput, serverOutput }) => {})`
 

@@ -53,7 +53,7 @@ export const generateTypeMapFile = (): void => {
     for (const symbol of [...inputTypeResult.unresolvedSymbols, ...outputTypeResult.unresolvedSymbols]) {
       if (!symbol.importPath) {
         unresolvedTypeAliases.add(symbol.name);
-        console.warn(`[TypeMapGenerator] Unresolved API type fallback (${pagePath}/${apiName}/${apiVersion}): ${symbol.name} -> any`);
+        console.error(`[TypeMapGenerator] Unresolved API type (${pagePath}/${apiName}/${apiVersion}): ${symbol.name}`);
         continue;
       }
       if (!namedImports.has(symbol.importPath)) {
@@ -139,7 +139,7 @@ export const generateTypeMapFile = (): void => {
     for (const symbol of allSyncUnresolvedSymbols) {
       if (!symbol.importPath) {
         unresolvedTypeAliases.add(symbol.name);
-        console.warn(`[TypeMapGenerator] Unresolved Sync type fallback (${pagePath}/${syncName}/${syncVersion}): ${symbol.name} -> any`);
+        console.error(`[TypeMapGenerator] Unresolved Sync type (${pagePath}/${syncName}/${syncVersion}): ${symbol.name}`);
         continue;
       }
       if (!namedImports.has(symbol.importPath)) {
@@ -158,13 +158,17 @@ export const generateTypeMapFile = (): void => {
 
   const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
 
+  if (unresolvedTypeAliases.size > 0) {
+    const unresolvedList = Array.from(unresolvedTypeAliases).sort().join(', ');
+    throw new Error(`[TypeMapGenerator] Aborting generation because unresolved type symbols were found: ${unresolvedList}`);
+  }
+
   const { content, docsData } = buildTypeMapArtifacts({
     typesByPage,
     syncTypesByPage,
     namedImports,
     defaultImports,
     functionsInterface,
-    unresolvedTypeAliases: Array.from(unresolvedTypeAliases),
   });
 
   writeTypeMapArtifacts({ content, docsData });

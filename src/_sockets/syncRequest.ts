@@ -2,7 +2,7 @@ import { dev, SessionLayout } from "config";
 import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import { statusContent } from "src/_providers/socketStatusProvider";
-import { Dispatch, RefObject, SetStateAction, useCallback } from "react";
+import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
 import { enqueueSyncRequest, isOnline } from "./offlineQueue";
 import type {
   SyncTypeMap
@@ -67,11 +67,31 @@ type SyncParamsForFullName<
     ignoreSelf?: boolean;
   };
 
+type RuntimeSyncParams = {
+  name?: string;
+  version?: string;
+  data?: unknown;
+  receiver?: string;
+  ignoreSelf?: boolean;
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Sync Event Callbacks Registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: any }) => void)[]> = {};
+type SyncEventCallback = (params: { clientOutput: unknown; serverOutput: unknown }) => void;
+const syncEvents: Record<string, SyncEventCallback[]> = {};
+
+type SyncLifecycleHandlers = {
+  connect: () => void;
+  disconnect: () => void;
+  reconnectAttempt: (attempt: number) => void;
+  userAfk: (payload: { userId: string; endTime?: number }) => void;
+  userBack: (payload: { userId: string }) => void;
+  connectError: (err: { message: string }) => void;
+};
+
+let activeLifecycleHandlers: SyncLifecycleHandlers | null = null;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // syncRequest Function Overloads
@@ -79,11 +99,9 @@ const syncEvents: Record<string, ((params: { clientOutput: any; serverOutput: an
 
 export function syncRequest<F extends SyncFullName, V extends VersionsForFullName<F>>(
   params: SyncParamsForFullName<F, V>
-): Promise<boolean>;
-
-// Implementation
-export function syncRequest(params: any): Promise<boolean> {
-  let { name, version, data, receiver, ignoreSelf } = params;
+): Promise<boolean> {
+  const runtimeParams = params as RuntimeSyncParams;
+  let { name, version, data, receiver, ignoreSelf } = runtimeParams;
 
   return new Promise(async (resolve) => {
     if (!name || typeof name !== "string") {
@@ -167,6 +185,8 @@ export function syncRequest(params: any): Promise<boolean> {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const useSyncEvents = () => {
+  const localRegistryRef = useRef<Map<string, SyncEventCallback>>(new Map());
+
   type TypedCallbackParams<F extends SyncFullName, V extends VersionsForFullName<F>> = {
     clientOutput: ClientOutputForFullName<F, V>;
     serverOutput: ServerOutputForFullName<F, V>;
@@ -209,9 +229,24 @@ export const useSyncEvents = () => {
     const sanitizedName = params.name.replaceAll(/^\/+|\/+$/g, '');
     const fullName = `sync/${sanitizedName}/${params.version}`;
     const callbacks = syncEvents[fullName] ?? [];
-    const callback = params.callback as (params: { clientOutput: any; serverOutput: any; aditionalData?: any }) => void;
-    callbacks.push(callback);
-    syncEvents[fullName] = callbacks;
+    const callback = params.callback as unknown as SyncEventCallback;
+
+    const previousForRoute = localRegistryRef.current.get(fullName);
+    if (previousForRoute) {
+      syncEvents[fullName] = callbacks.filter((cb) => cb !== previousForRoute);
+    }
+
+    const nextCallbacks = syncEvents[fullName] ?? [];
+    nextCallbacks.push(callback);
+    syncEvents[fullName] = nextCallbacks;
+    localRegistryRef.current.set(fullName, callback);
+
+    if (dev && nextCallbacks.length > 1) {
+      console.warn(
+        `[SyncEvents] Multiple callbacks registered for ${fullName} (${nextCallbacks.length}). ` +
+        `If this is unintentional, register callbacks in useEffect and return cleanup.`
+      );
+    }
 
     return () => {
       const current = syncEvents[fullName];
@@ -220,6 +255,24 @@ export const useSyncEvents = () => {
       if (syncEvents[fullName].length === 0) {
         delete syncEvents[fullName];
       }
+
+      if (localRegistryRef.current.get(fullName) === callback) {
+        localRegistryRef.current.delete(fullName);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      for (const [fullName, callback] of localRegistryRef.current.entries()) {
+        const current = syncEvents[fullName];
+        if (!current) continue;
+        syncEvents[fullName] = current.filter((cb) => cb !== callback);
+        if (syncEvents[fullName].length === 0) {
+          delete syncEvents[fullName];
+        }
+      }
+      localRegistryRef.current.clear();
     };
   }, []);
 
@@ -228,7 +281,7 @@ export const useSyncEvents = () => {
 
 export const useSyncEventTrigger = () => {
 
-  const triggerSyncEvent = (name: string, clientOutput: any = {}, serverOutput: any = {}) => {
+  const triggerSyncEvent = (name: string, clientOutput: unknown = {}, serverOutput: unknown = {}) => {
     const callbacks = syncEvents[name];
     if (!callbacks || callbacks.length === 0) {
       if (dev) {
@@ -269,7 +322,16 @@ export const initSyncRequest = async ({
   if (!socket) { return; }
   if (!sessionRef) { return; }
 
-  socket.on("connect", () => {
+  if (activeLifecycleHandlers) {
+    socket.off("connect", activeLifecycleHandlers.connect);
+    socket.off("disconnect", activeLifecycleHandlers.disconnect);
+    socket.off("reconnect_attempt", activeLifecycleHandlers.reconnectAttempt);
+    socket.off("userAfk", activeLifecycleHandlers.userAfk);
+    socket.off("userBack", activeLifecycleHandlers.userBack);
+    socket.off("connect_error", activeLifecycleHandlers.connectError);
+  }
+
+  const connect = () => {
     console.log(socketStatus)
     console.log("Connected to server");
     setSocketStatus(prev => ({
@@ -280,9 +342,9 @@ export const initSyncRequest = async ({
         // reconnectAttempt: undefined,
       }
     }));
-  });
+  };
 
-  socket.on("disconnect", () => {
+  const disconnect = () => {
     setSocketStatus(prev => ({
       ...prev,
       self: {
@@ -291,9 +353,9 @@ export const initSyncRequest = async ({
       }
     }));
     console.log("Disconnected, trying to reconnect...");
-  });
+  };
 
-  socket.on("reconnect_attempt", (attempt) => {
+  const reconnectAttempt = (attempt: number) => {
     setSocketStatus(prev => ({
       ...prev,
       self: {
@@ -303,10 +365,10 @@ export const initSyncRequest = async ({
       }
     }));
     console.log(`Reconnecting attempt ${attempt}...`);
-  });
+  };
 
   //? will not trigger when you call this event
-  socket.on("userAfk", ({ userId, endTime }) => {
+  const userAfk = ({ userId, endTime }: { userId: string; endTime?: number }) => {
     if (userId == sessionRef.current?.id) {
       setSocketStatus(prev => ({
         ...prev,
@@ -325,10 +387,10 @@ export const initSyncRequest = async ({
         }
       }));
     }
-  });
+  };
 
   //? will not trigger when you call this event
-  socket.on("userBack", ({ userId }) => {
+  const userBack = ({ userId }: { userId: string }) => {
     console.log("userBack", { userId });
 
     setSocketStatus(prev => ({
@@ -338,9 +400,9 @@ export const initSyncRequest = async ({
         endTime: undefined,
       }
     }));
-  });
+  };
 
-  socket.on("connect_error", (err) => {
+  const connectError = (err: { message: string }) => {
     console.log("connect_error", { err });
     setSocketStatus(prev => ({
       ...prev,
@@ -354,6 +416,22 @@ export const initSyncRequest = async ({
       console.error(`Connection error: ${err.message}`);
       toast.error(`Connection error: ${err.message}`);
     }
-  });
+  };
+
+  activeLifecycleHandlers = {
+    connect,
+    disconnect,
+    reconnectAttempt,
+    userAfk,
+    userBack,
+    connectError,
+  };
+
+  socket.on("connect", connect);
+  socket.on("disconnect", disconnect);
+  socket.on("reconnect_attempt", reconnectAttempt);
+  socket.on("userAfk", userAfk);
+  socket.on("userBack", userBack);
+  socket.on("connect_error", connectError);
 
 }

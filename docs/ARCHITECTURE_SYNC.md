@@ -156,15 +156,17 @@ import { useSyncEvents } from "src/_sockets/syncRequest";
 
 const { upsertSyncEventCallback } = useSyncEvents();
 
-upsertSyncEventCallback({
-  name: "examples/updateCounter",
-  version: "v1",
-  callback: ({ clientOutput, serverOutput }) => {
-    // clientOutput = result from _client.ts
-    // serverOutput = result from _server.ts
-    updateUI(serverOutput.newValue);
-  },
-});
+useEffect(() => {
+  return upsertSyncEventCallback({
+    name: "examples/updateCounter",
+    version: "v1",
+    callback: ({ clientOutput, serverOutput }) => {
+      // clientOutput = result from _client.ts
+      // serverOutput = result from _server.ts
+      updateUI(serverOutput.newValue);
+    },
+  });
+}, [upsertSyncEventCallback]);
 
 // Register callback for a nested page sync
 upsertSyncEventCallback({
@@ -257,6 +259,12 @@ In development, sync typing updates follow this sequence:
 5. Typed helpers become accurate (`syncRequest`, callback payload inference for `serverOutput`/`clientOutput`)
 
 Regeneration is asynchronous. After a save, there can be a short lag (typically hundreds of milliseconds) before generated helper types fully reflect the latest sync file state.
+
+Generation is strict: unresolved sync type symbols now fail type-map generation instead of falling back to `any` aliases in generated artifacts.
+
+For stable AI and CI inference, keep sync calls on the canonical typed helper signature and avoid local `any` wrappers or alternate loose signatures around `syncRequest` and callback payloads.
+
+Do not add `unsafe*` wrapper aliases around `syncRequest` or `upsertSyncEventCallback`. If runtime-dynamic tooling code needs localized assertions, keep them at the call site and do not hide helper signatures behind wrapper types.
 
 ## Timing-Aware AI Workflow
 
