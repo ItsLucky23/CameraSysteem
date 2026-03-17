@@ -155,8 +155,8 @@ If `httpMethod` is not exported, it's inferred from the API name:
 
 Include token via:
 
-- **Cookie**: `token=your-token` (set automatically on login)
-- **Header**: `Authorization: Bearer your-token`
+- **Cookie mode (`sessionBasedToken=false`)**: `token=your-token` (set automatically on login)
+- **Session-token mode (`sessionBasedToken=true`)**: `Authorization: Bearer your-token`
 
 For translated error responses over HTTP, send one of:
 

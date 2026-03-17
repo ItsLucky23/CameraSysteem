@@ -221,7 +221,7 @@ switch (location) {
 
 1. **OAuth state** - One-time state is generated/validated to mitigate OAuth login CSRF
 2. **CORS** - Only `DNS` and `EXTERNAL_ORIGINS` are allowed
-3. **HttpOnly cookies** - Tokens not accessible via JavaScript
+3. **Token delivery by mode** - `sessionBasedToken=false` uses HttpOnly cookies; `sessionBasedToken=true` avoids cookie token writes and uses session-token delivery for development workflows
 4. **bcrypt** - Passwords hashed with salt rounds
 4. **CSRF** - WebSocket architecture inherently prevents CSRF
 5. **Origin check** - Every request validates origin header

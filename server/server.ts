@@ -85,11 +85,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     return res.end(`method: ${method} not supported, use one of the following methods: GET, POST, PUT, DELETE`);
   }
 
-  const cookieHeader = req.headers.cookie || '';
-  const token = cookieHeader
-    .split('; ')
-    .find(row => row.startsWith('token='))
-    ?.split('=')[1];
+  const token = extractTokenFromRequest(req);
 
   //? here we load the application icon
   if (z.literal('/favicon.ico').safeParse(routePath).success) {
@@ -191,7 +187,10 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       }
       const cookieOptions = `HttpOnly; SameSite=Strict; Path=/; Max-Age=604800; ${process.env.SECURE == 'true' ? "Secure;" : ""}`
 
-      res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
+      if (!config.sessionBasedToken) {
+        res.setHeader("Set-Cookie", `token=${newToken}; ${cookieOptions}`);
+      }
+
       if (config.sessionBasedToken) {
         res.setHeader("X-Session-Token", newToken);
       }
@@ -223,7 +222,7 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
     const location = process.env.DNS
 
-    if (config.sessionBasedToken && config.dev) {
+    if (config.sessionBasedToken) {
       res.writeHead(302, {
         Location: `${process.env.DNS}?token=${newToken}`,
       });

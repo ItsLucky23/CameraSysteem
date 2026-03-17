@@ -104,8 +104,8 @@ Controlled by `sessionBasedToken` in `config.ts`:
 
 Notes:
 - Token extraction is strict by mode (no fallback between cookie and sessionStorage sources).
-- OAuth callback token-in-URL redirect is only used in development when `sessionBasedToken` is `true`.
-- In non-development environments, OAuth callback uses HttpOnly cookie delivery.
+- When `sessionBasedToken` is `true`, auth flows do not set token cookies; credentials login returns `X-Session-Token` and OAuth callback redirects with `?token=`.
+- When `sessionBasedToken` is `false`, auth flows use HttpOnly cookie delivery.
 
 ---
 

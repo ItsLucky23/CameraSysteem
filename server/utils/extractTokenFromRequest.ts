@@ -1,4 +1,5 @@
 import { IncomingMessage } from 'http';
+import config from '../../config';
 
 /**
  * Extract the authentication token from an HTTP request.
@@ -17,13 +18,15 @@ import { IncomingMessage } from 'http';
  * ```
  */
 export const extractTokenFromRequest = (req: IncomingMessage): string | null => {
-  // 1. Check Authorization header (Bearer token)
-  const authHeader = req.headers.authorization;
-  if (authHeader?.startsWith('Bearer ')) {
-    return authHeader.slice(7);
+  // Strict extraction by configured token mode.
+  if (config.sessionBasedToken) {
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+    return null;
   }
 
-  // 2. Check cookies
   const cookieHeader = req.headers.cookie;
   if (cookieHeader) {
     const tokenCookie = cookieHeader
