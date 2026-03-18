@@ -66,7 +66,6 @@ export function useSocket(session: SessionLayout | null) {
 
     if (config.socketActivityBroadcaster) {
       initSyncRequest({
-        socketStatus,
         setSocketStatus,
         sessionRef: sessionRef as RefObject<SessionLayout>
       })

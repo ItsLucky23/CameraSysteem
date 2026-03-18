@@ -103,7 +103,7 @@ export default function Dropdown({
         value: item.value ?? (isPrimitiveItem(rawItem) ? rawItem : `jsx-item-${index}`),
         label,
         item: rawItem,
-        selectedItem: item.selectedItem ?? rawItem,
+        selectedItem: item.selectedItem ?? (isPrimitiveItem(rawItem) ? rawItem : label),
         searchText: item.searchText ?? label,
         disabled: item.disabled ?? false,
         index,
@@ -325,8 +325,9 @@ export default function Dropdown({
         ${className}
       `}
     >
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
@@ -352,7 +353,7 @@ export default function Dropdown({
             isOpen ? "rotate-180" : ""
           }`}
         />
-      </button>
+      </div>
 
       {isMenuMounted && createPortal(
         <div
@@ -395,15 +396,17 @@ export default function Dropdown({
             </div>
           )}
 
-          <div className="flex flex-col overflow-y-auto p-1" style={{ maxHeight: optionsMaxHeight }}>
+          <div className="flex flex-col overflow-y-auto p-1" style={{ maxHeight: optionsMaxHeight }} role="listbox">
             {filteredOptions.map((option) => {
               const isSelected = option.value === value;
 
               return (
-                <button
+                <div
                   key={option.key}
-                  type="button"
-                  disabled={option.disabled}
+                  role="option"
+                  aria-selected={isSelected}
+                  aria-disabled={option.disabled}
+                  tabIndex={option.disabled ? -1 : 0}
                   className={`
                     flex w-full items-center justify-between gap-2 rounded-sm text-left transition-colors
                     border border-transparent
@@ -419,10 +422,19 @@ export default function Dropdown({
                     onSelect?.({ value: option.value, index: option.index, label: option.label });
                     closeDropdown();
                   }}
+                  onKeyDown={(event) => {
+                    if (option.disabled) return;
+                    if (event.key !== "Enter" && event.key !== " ") return;
+
+                    event.preventDefault();
+                    onChange?.(option.value);
+                    onSelect?.({ value: option.value, index: option.index, label: option.label });
+                    closeDropdown();
+                  }}
                 >
                   <span className="flex-1 min-w-0">{option.item}</span>
                   {isSelected && <FontAwesomeIcon icon={faCheck} className="ml-2 text-xs" />}
-                </button>
+                </div>
               );
             })}
 

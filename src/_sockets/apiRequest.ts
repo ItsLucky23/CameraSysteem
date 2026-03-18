@@ -1,5 +1,4 @@
 import { dev } from "config";
-import { toast } from "sonner";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import type { ApiTypeMap } from './apiTypes.generated';
 import notify from "src/_functions/notify";
@@ -22,6 +21,29 @@ const isGetMethod = (apiName: string): boolean => {
   return lower.startsWith('get') || lower.startsWith('fetch') || lower.startsWith('list');
 };
 
+const canSendNow = (socketInstance: Socket) => {
+  if (!socketInstance.connected) return false;
+  return isOnline();
+};
+
+const createQueueId = () => {
+  return `${String(Date.now())}-${String(Math.random())}`;
+};
+
+const sanitizeName = (name: string) => name.replaceAll(/^\/+|\/+$/g, '');
+
+const shouldUseAbortController = ({
+  abortable,
+  isGet,
+}: {
+  abortable: boolean | undefined;
+  isGet: boolean;
+}) => {
+  if (abortable === true) return true;
+  if (abortable === false) return false;
+  return isGet;
+};
+
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Type Helpers
@@ -29,10 +51,10 @@ const isGetMethod = (apiName: string): boolean => {
 
 // Check if data input is required (i.e., T does NOT allow empty object)
 // Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
-type DataRequired<T> = {} extends T ? false : true;
+type DataRequired<T> = Record<string, never> extends T ? false : true;
 
 type UnionToIntersection<U> =
-  (U extends any ? (arg: U) => void : never) extends ((arg: infer I) => void)
+  (U extends unknown ? (arg: U) => void : never) extends ((arg: infer I) => void)
     ? I
     : never;
 
@@ -41,11 +63,13 @@ type UnionToIntersection<U> =
 // ═══════════════════════════════════════════════════════════════════════════════
 type ApiRouteRecord = UnionToIntersection<{
   [P in keyof ApiTypeMap]: {
-    [N in keyof ApiTypeMap[P] as P extends 'root' ? `${N & string}` : `${P & string}/${N & string}`]: ApiTypeMap[P][N]
+    [N in keyof ApiTypeMap[P] as P extends 'root'
+      ? Extract<N, string>
+      : `${Extract<P, string>}/${Extract<N, string>}`]: ApiTypeMap[P][N]
   }
 }[keyof ApiTypeMap]>;
 
-type ApiFullName = keyof ApiRouteRecord & string;
+type ApiFullName = Extract<keyof ApiRouteRecord, string>;
 type VersionsForFullName<F extends ApiFullName> = keyof ApiRouteRecord[F] & string;
 
 // Force expansion of types to clear aliases in tooltips
@@ -69,13 +93,28 @@ type ApiParamsForFullName<
   ? { name: F; version: V; data: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; }
   : { name: F; version: V; data?: Prettify<InputForFullName<F, V>>; abortable?: boolean; disableErrorMessage?: boolean; };
 
-type RuntimeApiParams = {
+interface RuntimeApiParams {
   name?: string;
   version?: string;
   data?: unknown;
   abortable?: boolean;
   disableErrorMessage?: boolean;
-};
+}
+
+interface ApiErrorResponse {
+  status: 'error';
+  httpStatus: number;
+  message: string;
+  errorCode: string;
+  errorParams?: { key: string; value: string | number | boolean }[];
+}
+
+interface ApiSuccessResponse extends Record<string, unknown> {
+  status: 'success';
+  httpStatus: number;
+}
+
+type ApiResponse = ApiErrorResponse | ApiSuccessResponse;
 
 /**
  * Type-safe API request function.
@@ -94,128 +133,147 @@ type RuntimeApiParams = {
 export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<F>>(
   params: ApiParamsForFullName<F, V>
 ): Promise<Prettify<OutputForFullName<F, V>>> {
-  type RequestOutput = Prettify<OutputForFullName<F, V>>;
+  type RequestOutput = Prettify<OutputForFullName<F, V> & ApiResponse>;
   const runtimeParams = params as RuntimeApiParams;
-  let { name, version, disableErrorMessage = false } = runtimeParams;
-  let { data } = runtimeParams;
+  const { name, version, disableErrorMessage = false } = runtimeParams;
+  const payloadData = runtimeParams.data;
 
-  return new Promise<RequestOutput>(async (resolve, reject) => {
-    if (!name || typeof name !== "string") {
-      if (dev) {
-        console.error("Invalid name");
-        toast.error("Invalid name");
-      }
-      return resolve(null as unknown as RequestOutput);
-    }
-
-    if (!version || typeof version !== 'string') {
-      if (dev) {
-        console.error("Invalid version");
-        toast.error("Invalid version");
-      }
-      return resolve(null as unknown as RequestOutput);
-    }
-
-    if (!data || typeof data !== "object") {
-      data = {};
-    }
-
-    if (!await waitForSocket()) { return resolve(null as unknown as RequestOutput); }
-    if (!socket) { return resolve(null as unknown as RequestOutput); }
-
-    name = name.replace(/^\/+|\/+$/g, '');
-
-    //? Abort controller logic:
-    //? - abortable: true → always use abort controller
-    //? - abortable: false → never use abort controller  
-    //? - abortable: undefined → smart default (GET-like APIs get abort controller)
-    const terminalName = name.split('/').at(-1) ?? name;
-    const isGet = isGetMethod(terminalName as string);
-    const useAbortController = runtimeParams.abortable === true || isGet;
-    const fullname = `api/${name}/${version}`;
-
-    let signal: AbortSignal | null = null;
-    let abortFunc = () => { };
-    let queueId: string | null = null;
-
-    if (useAbortController) {
-      if (abortControllers.has(fullname as string)) {
-        //? if we have an abort controller we abort it and create a new one
-        const prevAbortController = abortControllers.get(fullname as string);
-        prevAbortController?.abort();
-      }
-      //? here we create a new abort controller and add it to the map with the api fullname as the key
-      const abortController = new AbortController();
-      abortControllers.set(fullname as string, abortController);
-      abortFunc = () => {
-        if (signal) { signal.removeEventListener("abort", abortFunc); }
-        if (queueId) { removeApiQueueItem(queueId); }
-        reject(`Request ${fullname} aborted`)
-      };
-      //? here we bind the abortFunc to the abort event so it will be called when the abort controller is aborted
-      signal = abortController.signal;
-      signal.addEventListener("abort", abortFunc);
-    }
-
-    const canSendNow = (s: Socket) => {
-      if (!s.connected) return false;
-      return isOnline();
-    };
-
-    const runRequest = (socketInstance: Socket) => {
-      if (!canSendNow(socketInstance)) {
-        if (!queueId) {
-          queueId = `${Date.now()}-${Math.random()}`;
+  return new Promise<RequestOutput>((resolve, reject) => {
+    void (async () => {
+      if (!name || typeof name !== "string") {
+        if (dev) {
+          console.error("Invalid name");
+          notify.error({ key: 'api.invalidName' });
         }
-        enqueueApiRequest({
-          id: queueId,
-          key: fullname,
-          run: (s) => runRequest(s),
-          createdAt: Date.now(),
-        });
+        resolve(null as unknown as RequestOutput);
         return;
       }
 
-      if (signal && signal.aborted) { return; }
-
-      const tempIndex = incrementResponseIndex();
-      socketInstance.emit('apiRequest', { name: fullname, data, responseIndex: tempIndex });
-
-      type ApiResponse =
-        | ({ status: "success"; httpStatus: number } & any)
-        | { status: "error"; httpStatus: number; message: string; errorCode: string; errorParams?: { key: string; value: string | number | boolean; }[] };
-
-      if (dev) { console.log(`Client API Request(${tempIndex}): `, { APINAME: name, data }) }
-      socketInstance.once(`apiResponse-${tempIndex}`, (response: ApiResponse) => {
-        if (signal && signal.aborted) { return; }
-
-        const { status } = response;
-
-        if (dev) { console.log(`Server API Response(${tempIndex}): `, { ...response, APINAME: name }) }
-
-        if (status === "error") {
-          const normalizedError = normalizeErrorResponseCore({ response });
-
-          if (!disableErrorMessage) {
-            // toast.error(message)
-            if (normalizedError.errorCode) {
-              notify.error({ key: normalizedError.errorCode, params: normalizedError.errorParams })
-            } else {
-              notify.error({ key: normalizedError.message })
-            }
-          }
-          return resolve(normalizedError as unknown as RequestOutput)
+      if (!version || typeof version !== 'string') {
+        if (dev) {
+          console.error("Invalid version");
+          notify.error({ key: 'api.invalidVersion' });
         }
+        resolve(null as unknown as RequestOutput);
+        return;
+      }
 
-        if (signal) {
-          signal.removeEventListener("abort", abortFunc);
-          abortControllers.delete(fullname as string);
-        }
+      const data = payloadData && typeof payloadData === "object" ? payloadData : {};
 
-        resolve(response as RequestOutput)
+      if (!await waitForSocket()) {
+        resolve(null as unknown as RequestOutput);
+        return;
+      }
+      if (!socket) {
+        resolve(null as unknown as RequestOutput);
+        return;
+      }
+
+      const sanitizedName = sanitizeName(name);
+
+      //? Abort controller logic:
+      //? - abortable: true → always use abort controller
+      //? - abortable: false → never use abort controller
+      //? - abortable: undefined → smart default (GET-like APIs get abort controller)
+      const terminalName = sanitizedName.split('/').at(-1) ?? sanitizedName;
+      const isGet = isGetMethod(terminalName);
+      const useAbortController = shouldUseAbortController({
+        abortable: runtimeParams.abortable,
+        isGet,
       });
-    };
+      const fullName = `api/${sanitizedName}/${version}`;
 
-    runRequest(socket);
-  })
+      let signal: AbortSignal | null = null;
+      let abortHandler: (() => void) | null = null;
+      let queueId: string | null = null;
+
+      const cleanupAbortController = () => {
+        if (signal && abortHandler) {
+          signal.removeEventListener("abort", abortHandler);
+        }
+        abortControllers.delete(fullName);
+      };
+
+      if (useAbortController) {
+        if (abortControllers.has(fullName)) {
+          const prevAbortController = abortControllers.get(fullName);
+          prevAbortController?.abort();
+        }
+        const abortController = new AbortController();
+        abortControllers.set(fullName, abortController);
+        signal = abortController.signal;
+
+        abortHandler = () => {
+          cleanupAbortController();
+          if (queueId) {
+            removeApiQueueItem(queueId);
+          }
+          reject(new Error(`Request ${fullName} aborted`));
+        };
+
+        signal.addEventListener("abort", abortHandler);
+      }
+
+      const runRequest = (socketInstance: Socket) => {
+        if (!canSendNow(socketInstance)) {
+          queueId ??= createQueueId();
+          enqueueApiRequest({
+            id: queueId,
+            key: fullName,
+            run: (nextSocket) => {
+              runRequest(nextSocket);
+            },
+            createdAt: Date.now(),
+          });
+          return;
+        }
+
+        if (signal?.aborted) {
+          return;
+        }
+
+        const tempIndex = incrementResponseIndex();
+        socketInstance.emit('apiRequest', { name: fullName, data, responseIndex: tempIndex });
+
+        if (dev) {
+          console.log(`Client API Request(${String(tempIndex)}):`, { APINAME: sanitizedName, data });
+        }
+
+        socketInstance.once(`apiResponse-${String(tempIndex)}`, (response: RequestOutput) => {
+          if (signal?.aborted) {
+            return;
+          }
+
+          const status = response.status;
+
+          if (dev) {
+            console.log(`Server API Response(${String(tempIndex)}):`, { ...response, APINAME: sanitizedName });
+          }
+
+          if (status === "error") {
+            const normalizedError = normalizeErrorResponseCore({ response });
+
+            if (!disableErrorMessage) {
+              if (normalizedError.errorCode) {
+                notify.error({ key: normalizedError.errorCode, params: normalizedError.errorParams });
+              } else {
+                notify.error({ key: normalizedError.message });
+              }
+            }
+
+            Object.assign(response, normalizedError);
+            cleanupAbortController();
+            resolve(response);
+            return;
+          }
+
+          cleanupAbortController();
+
+          resolve(response);
+        });
+      };
+
+      runRequest(socket);
+    })();
+  });
 }

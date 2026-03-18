@@ -15,10 +15,10 @@ import { Socket } from "socket.io-client";
 
 // Check if data input is required (i.e., T does NOT allow empty object)
 // Unions like {a:1} | {b:1} do NOT allow {}, so data will be required
-type DataRequired<T> = {} extends T ? false : true;
+type DataRequired<T> = Record<string, never> extends T ? false : true;
 
 type UnionToIntersection<U> =
-  (U extends any ? (arg: U) => void : never) extends ((arg: infer I) => void)
+  (U extends unknown ? (arg: U) => void : never) extends ((arg: infer I) => void)
     ? I
     : never;
 
@@ -101,82 +101,95 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
   params: SyncParamsForFullName<F, V>
 ): Promise<boolean> {
   const runtimeParams = params as RuntimeSyncParams;
-  let { name, version, data, receiver, ignoreSelf } = runtimeParams;
+  const { name, version, ignoreSelf } = runtimeParams;
+  const payloadData = runtimeParams.data;
+  const receiver = runtimeParams.receiver;
 
-  return new Promise(async (resolve) => {
-    if (!name || typeof name !== "string") {
-      if (dev) {
-        console.error("Invalid name for syncRequest");
-        toast.error("Invalid name for syncRequest");
-      }
-      return resolve(false);
-    }
-
-    if (!data || typeof data !== "object") {
-      data = {};
-    }
-
-    if (!version || typeof version !== 'string') {
-      if (dev) {
-        console.error("Invalid version for syncRequest");
-        toast.error("Invalid version for syncRequest");
-      }
-      return resolve(false);
-    }
-
-    if (!receiver) {
-      if (dev) {
-        console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
-        toast.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets wich we dont recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
-      }
-      return resolve(false);
-    }
-
-    if (!await waitForSocket()) { return resolve(false); }
-    if (!socket) { return resolve(false); }
-
-    name = name.replaceAll(/^\/+|\/+$/g, '');
-    const fullName = `sync/${name}/${version}`;
-    let queueId: string | null = null;
-
-    const canSendNow = (s: Socket) => {
-      if (!s.connected) return false;
-      return isOnline();
-    };
-
-    const runRequest = (socketInstance: Socket) => {
-      if (!canSendNow(socketInstance)) {
-        if (!queueId) {
-          queueId = `${Date.now()}-${Math.random()}`;
+  return new Promise((resolve) => {
+    void (async () => {
+      if (!name || typeof name !== "string") {
+        if (dev) {
+          console.error("Invalid name for syncRequest");
+          toast.error("Invalid name for syncRequest");
         }
-        enqueueSyncRequest({
-          id: queueId,
-          key: fullName,
-          run: (s) => runRequest(s),
-          createdAt: Date.now(),
-        });
+        resolve(false);
         return;
       }
 
-      const tempIndex = incrementResponseIndex();
+      const data = payloadData && typeof payloadData === "object" ? payloadData : {};
 
-      if (dev) { console.log(`Client Sync Request:`, { name, data, receiver, ignoreSelf }) }
-
-      socketInstance.emit('sync', { name: fullName, data, cb: `${name}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
-
-      socketInstance.once(`sync-${tempIndex}`, (data: { status: "success" | "error", message: string }) => {
-        if (data.status === "error") {
-          if (dev) {
-            console.error(`Sync ${name} failed: ${data.message}`);
-            toast.error(`Sync ${name} failed: ${data.message}`);
-          }
-          return resolve(false);
+      if (!version || typeof version !== 'string') {
+        if (dev) {
+          console.error("Invalid version for syncRequest");
+          toast.error("Invalid version for syncRequest");
         }
-        resolve(data.status == "success");
-      });
-    };
+        resolve(false);
+        return;
+      }
 
-    runRequest(socket);
+      if (!receiver) {
+        if (dev) {
+          console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+          toast.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+        }
+        resolve(false);
+        return;
+      }
+
+      if (!await waitForSocket()) {
+        resolve(false);
+        return;
+      }
+      if (!socket) {
+        resolve(false);
+        return;
+      }
+
+      const sanitizedName = name.replaceAll(/^\/+|\/+$/g, '');
+      const fullName = `sync/${sanitizedName}/${version}`;
+      let queueId: string | null = null;
+
+      const canSendNow = (s: Socket) => {
+        if (!s.connected) return false;
+        return isOnline();
+      };
+
+      const runRequest = (socketInstance: Socket) => {
+        if (!canSendNow(socketInstance)) {
+          if (!queueId) {
+            queueId = `${Date.now()}-${Math.random()}`;
+          }
+          enqueueSyncRequest({
+            id: queueId,
+            key: fullName,
+            run: (s) => runRequest(s),
+            createdAt: Date.now(),
+          });
+          return;
+        }
+
+        const tempIndex = incrementResponseIndex();
+
+        if (dev) { console.log(`Client Sync Request:`, { name: sanitizedName, data, receiver, ignoreSelf }) }
+
+        socketInstance.emit('sync', { name: fullName, data, cb: `${sanitizedName}/${version}`, receiver, responseIndex: tempIndex, ignoreSelf });
+
+        socketInstance.once(`sync-${tempIndex}`, (responseData: { status: "success" | "error", message: string }) => {
+          if (responseData.status === "error") {
+            if (dev) {
+              console.error(`Sync ${sanitizedName} failed: ${responseData.message}`);
+              toast.error(`Sync ${sanitizedName} failed: ${responseData.message}`);
+            }
+            resolve(false);
+            return;
+          }
+
+          resolve(responseData.status === "success");
+        });
+      };
+
+      runRequest(socket);
+    })();
   })
 }
 
@@ -301,14 +314,9 @@ export const useSyncEventTrigger = () => {
 }
 
 export const initSyncRequest = async ({
-  socketStatus,
   setSocketStatus,
   sessionRef
 }: {
-  socketStatus: {
-    self: statusContent;
-    [userId: string]: statusContent;
-  };
   setSocketStatus: Dispatch<
     SetStateAction<{
       self: statusContent;
@@ -332,7 +340,6 @@ export const initSyncRequest = async ({
   }
 
   const connect = () => {
-    console.log(socketStatus)
     console.log("Connected to server");
     setSocketStatus(prev => ({
       ...prev,

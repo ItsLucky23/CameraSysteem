@@ -29,7 +29,14 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
   const inputRequiredAndInvalid = input && input !== inputValue ? true : false;
 
   return (
-    <div className="p-6 flex flex-col gap-4 bg-container1 w-full max-w-md">
+    <form
+      className="p-6 flex flex-col gap-4 bg-container1 w-full max-w-md"
+      data-menuhandler-submit-on-enter="true"
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleConfirm();
+      }}
+    >
       <h2 className="text-xl font-bold">{title}</h2>
 
       {typeof content === 'string' ? (
@@ -54,13 +61,14 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
 
       <div className="flex gap-4 justify-end">
         <button
+          type="button"
           onClick={handleCancel}
           className="px-4 py-2 rounded bg-container2 hover:bg-container2-hover text-common text-sm font-semibold border border-container2-border"
         >
           {translate({ key: 'confirm.cancel' })}
         </button>
         <button
-          onClick={handleConfirm}
+          type="submit"
           disabled={inputRequiredAndInvalid}
           className={`px-4 py-2 rounded text-sm text-white transition font-semibold
             ${inputRequiredAndInvalid
@@ -71,7 +79,7 @@ export function ConfirmMenu({ title, content, input, resolve }: ConfirmMenuProps
           {translate({ key: 'confirm.confirm' })}
         </button>
       </div>
-    </div>
+    </form>
   );
 }
 

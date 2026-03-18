@@ -96,6 +96,16 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
   const [stack, setStack] = useState<MenuEntry[]>([]);
   const attemptToCloseAllRef = useRef(false);
 
+  const submitTopFormFromEnter = useCallback(() => {
+    const menuRoot = document.querySelector('#MENUHANDLER');
+    if (!(menuRoot instanceof HTMLElement)) return;
+
+    const form = menuRoot.querySelector('form[data-menuhandler-submit-on-enter="true"]');
+    if (!(form instanceof HTMLFormElement)) return;
+
+    form.requestSubmit();
+  }, []);
+
   const open = useCallback((element: ReactElement, options: MenuOptions = {}) => {
     return new Promise<unknown>((resolve) => {
       const id = uuidv4();
@@ -241,6 +251,26 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
       setMenuHandlerRef(null);
     });
   }, []);
+
+  useEffect(() => {
+    if (stack.length === 0) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' || event.repeat || event.isComposing) return;
+
+      const target = event.target;
+      if (target instanceof HTMLElement && (target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      submitTopFormFromEnter();
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [stack.length, submitTopFormFromEnter]);
 
   return (
     <MenuHandlerContext value={contextValue}>
