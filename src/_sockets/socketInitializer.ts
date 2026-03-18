@@ -1,10 +1,33 @@
-import { toast } from "sonner";
-import { io, Socket } from 'socket.io-client';
+import { io, ManagerOptions, Socket, SocketOptions } from 'socket.io-client';
 import config, { dev, backendUrl, SessionLayout } from "config";
+import notify from "src/_functions/notify";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
-import { RefObject, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { initSyncRequest, useSyncEventTrigger } from "./syncRequest";
 import { flushApiQueue, flushSyncQueue, isOnline } from "./offlineQueue";
+
+interface SyncEventPayload {
+  cb?: string;
+  clientOutput?: unknown;
+  serverOutput?: unknown;
+  message?: string;
+  status?: 'success' | 'error';
+  fullName?: string;
+  errorCode?: string;
+  errorParams?: { key: string; value: string | number | boolean }[];
+  httpStatus?: number;
+}
+
+const setDisconnectedStatus = (setSocketStatus: ReturnType<typeof useSocketStatus>["setSocketStatus"]) => {
+  setSocketStatus(prev => ({
+    ...prev,
+    self: {
+      status: "DISCONNECTED",
+      reconnectAttempt: undefined,
+      endTime: undefined,
+    }
+  }));
+};
 
 export let socket: Socket | null = null;
 
@@ -17,13 +40,18 @@ export function useSocket(session: SessionLayout | null) {
   const { socketStatus, setSocketStatus } = useSocketStatus();
   const { triggerSyncEvent } = useSyncEventTrigger();
   const sessionRef = useRef(session);
+  const socketStatusRef = useRef(socketStatus);
 
   useEffect(() => {
     sessionRef.current = session;
   }, [session])
 
   useEffect(() => {
-    const socketOptions: any = {
+    socketStatusRef.current = socketStatus;
+  }, [socketStatus]);
+
+  useEffect(() => {
+    const socketOptions: Partial<ManagerOptions & SocketOptions> = {
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
@@ -45,7 +73,7 @@ export function useSocket(session: SessionLayout | null) {
 
     const canFlushQueue = () => socketConnection.connected && isOnline();
 
-    const handleVisibility = async () => {
+    const handleVisibility = () => {
       if (!config.socketActivityBroadcaster) { return; }
 
       console.log(document.visibilityState)
@@ -56,7 +84,7 @@ export function useSocket(session: SessionLayout | null) {
 
         //? user switched back to the tab
       } else if (document.visibilityState === "visible") {
-        if (socketStatus.self.status !== "CONNECTED") {
+        if (socketStatusRef.current.self.status !== "CONNECTED") {
           socketConnection.connect();
         }
         socketConnection.emit("intentionalReconnect");
@@ -67,7 +95,7 @@ export function useSocket(session: SessionLayout | null) {
     if (config.socketActivityBroadcaster) {
       initSyncRequest({
         setSocketStatus,
-        sessionRef: sessionRef as RefObject<SessionLayout>
+        sessionRef,
       })
     } else {
       socketConnection.on("connect", () => {
@@ -85,7 +113,7 @@ export function useSocket(session: SessionLayout | null) {
       socketConnection.on("connect_error", (err) => {
         if (dev) {
           console.error(`Connection error: ${err.message}`);
-          toast.error(`Connection error: ${err.message}`);
+          notify.error({ key: 'common.connectionError' });
         }
       });
     }
@@ -100,28 +128,35 @@ export function useSocket(session: SessionLayout | null) {
         if (config.sessionBasedToken) {
           sessionStorage.clear();
         }
-        window.location.href = config.loginPageUrl;
+        globalThis.location.href = config.loginPageUrl;
       } else {
         console.error("Logout failed");
-        toast.error("Logout failed");
+        notify.error({ key: 'common.logoutFailed' });
       }
     });
 
-    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams, httpStatus }) => {
+    socketConnection.on("sync", ({ cb, clientOutput, serverOutput, message, status, fullName, errorCode, errorParams, httpStatus }: SyncEventPayload) => {
       if (dev) console.log("Server Sync Response:", { cb, clientOutput, serverOutput, status, message, fullName, errorCode, errorParams, httpStatus });
 
       if (status === "error") {
+        if (errorCode === 'sync.ignore' || message === 'sync.ignore') {
+          return;
+        }
         if (dev) {
-          toast.error(message);
+          if (errorCode) {
+            notify.error({ key: errorCode, params: errorParams });
+          } else if (message) {
+            notify.error({ key: message });
+          }
         }
         return;
       }
 
       if (typeof fullName !== 'string' || fullName.length === 0) {
-        const errorMessage = `Sync response is missing fullName for cb '${cb}'.`;
+        const errorMessage = `Sync response is missing fullName for cb '${cb ?? 'unknown'}'.`;
         if (dev) {
           console.error(errorMessage);
-          toast.error(errorMessage);
+          notify.error({ key: 'sync.invalidRequestFormat' });
         }
         throw new Error(errorMessage);
       }
@@ -139,27 +174,20 @@ export function useSocket(session: SessionLayout | null) {
       socketConnection.connect();
     };
 
-    window.addEventListener("online", handleOnline);
+    globalThis.addEventListener("online", handleOnline);
 
     return () => {
       if (socket) {
         socket.disconnect();
         socket = null;
-        setSocketStatus(prev => ({
-          ...prev,
-          self: {
-            status: "DISCONNECTED",
-            reconnectAttempt: undefined,
-            endTime: undefined,
-          }
-        }));
+        setDisconnectedStatus(setSocketStatus);
       }
 
       document.removeEventListener("visibilitychange", handleVisibility)
-      window.removeEventListener("online", handleOnline)
+      globalThis.removeEventListener("online", handleOnline)
     };
 
-  }, []);
+  }, [setSocketStatus, triggerSyncEvent]);
 
   return socket;
 }
@@ -174,7 +202,7 @@ export const waitForSocket = async () => {
     if (i > 500) {
       if (dev) {
         console.error("Socket is not initialized, giving up");
-        toast.error("Socket is not initialized, giving up");
+        notify.error({ key: 'common.socketNotInitialized' });
       }
       return false
     } //? we give it 500 * 10 so 5000ms or 5s to load the socket connection
@@ -184,110 +212,140 @@ export const waitForSocket = async () => {
 }
 
 export const joinRoom = async (group: string) => {
-  return new Promise<{ success: true; rooms: string[] } | null>(async (resolve) => {
-    if (!group || typeof group !== "string") {
-      if (dev) {
-        console.error("Invalid group");
-        toast.error("Invalid group");
-      }
-      return resolve(null);
-    }
-
-    if (!await waitForSocket()) { return resolve(null); }
-    if (!socket) { return resolve(null); }
-
-    const tempIndex = incrementResponseIndex();
-    socket.emit('joinRoom', { group, responseIndex: tempIndex });
-
-    socket.once(`joinRoom-${tempIndex}`, (response?: { error?: string; rooms?: unknown }) => {
-      if (response?.error) {
+  return new Promise<{ success: true; rooms: string[] } | null>((resolve) => {
+    void (async () => {
+      if (!group || typeof group !== "string") {
         if (dev) {
-          console.error(response.error);
-          toast.error(response.error);
+          console.error("Invalid group");
+          notify.error({ key: 'common.invalidGroup' });
         }
-        return resolve(null);
+        resolve(null);
+        return;
       }
 
-      const rooms = Array.isArray(response?.rooms)
-        ? response.rooms.filter((room): room is string => typeof room === 'string')
-        : [];
+      if (!await waitForSocket()) {
+        resolve(null);
+        return;
+      }
+      if (!socket) {
+        resolve(null);
+        return;
+      }
 
-      return resolve({ success: true, rooms });
-    });
-  })
+      const tempIndex = incrementResponseIndex();
+      socket.emit('joinRoom', { group, responseIndex: tempIndex });
+
+      socket.once(`joinRoom-${String(tempIndex)}`, (response?: { error?: string; rooms?: unknown }) => {
+        if (response?.error) {
+          if (dev) {
+            console.error(response.error);
+            notify.error({ key: response.error });
+          }
+          resolve(null);
+          return;
+        }
+
+        const rooms = Array.isArray(response?.rooms)
+          ? response.rooms.filter((room): room is string => typeof room === 'string')
+          : [];
+
+        resolve({ success: true, rooms });
+      });
+    })();
+  });
 }
 
 export const leaveRoom = async (group: string) => {
-  return new Promise<{ success: true; rooms: string[] } | null>(async (resolve) => {
-    if (!group || typeof group !== "string") {
-      if (dev) {
-        console.error("Invalid group");
-        toast.error("Invalid group");
-      }
-      return resolve(null);
-    }
-
-    if (!await waitForSocket()) { return resolve(null); }
-    if (!socket) { return resolve(null); }
-
-    const tempIndex = incrementResponseIndex();
-    socket.emit('leaveRoom', { group, responseIndex: tempIndex });
-
-    socket.once(`leaveRoom-${tempIndex}`, (response?: { error?: string; rooms?: unknown }) => {
-      if (response?.error) {
+  return new Promise<{ success: true; rooms: string[] } | null>((resolve) => {
+    void (async () => {
+      if (!group || typeof group !== "string") {
         if (dev) {
-          console.error(response.error);
-          toast.error(response.error);
+          console.error("Invalid group");
+          notify.error({ key: 'common.invalidGroup' });
         }
-        return resolve(null);
+        resolve(null);
+        return;
       }
 
-      const rooms = Array.isArray(response?.rooms)
-        ? response.rooms.filter((room): room is string => typeof room === 'string')
-        : [];
+      if (!await waitForSocket()) {
+        resolve(null);
+        return;
+      }
+      if (!socket) {
+        resolve(null);
+        return;
+      }
 
-      return resolve({ success: true, rooms });
-    });
-  })
+      const tempIndex = incrementResponseIndex();
+      socket.emit('leaveRoom', { group, responseIndex: tempIndex });
+
+      socket.once(`leaveRoom-${String(tempIndex)}`, (response?: { error?: string; rooms?: unknown }) => {
+        if (response?.error) {
+          if (dev) {
+            console.error(response.error);
+            notify.error({ key: response.error });
+          }
+          resolve(null);
+          return;
+        }
+
+        const rooms = Array.isArray(response?.rooms)
+          ? response.rooms.filter((room): room is string => typeof room === 'string')
+          : [];
+
+        resolve({ success: true, rooms });
+      });
+    })();
+  });
 }
 
 export const getJoinedRooms = async () => {
-  return new Promise<string[] | null>(async (resolve) => {
-    if (!await waitForSocket()) { return resolve(null); }
-    if (!socket) { return resolve(null); }
-
-    const tempIndex = incrementResponseIndex();
-    socket.emit('getJoinedRooms', { responseIndex: tempIndex });
-
-    socket.once(`getJoinedRooms-${tempIndex}`, (response?: { error?: string; rooms?: unknown }) => {
-      if (response?.error) {
-        if (dev) {
-          console.error(response.error);
-          toast.error(response.error);
-        }
-        return resolve(null);
+  return new Promise<string[] | null>((resolve) => {
+    void (async () => {
+      if (!await waitForSocket()) {
+        resolve(null);
+        return;
+      }
+      if (!socket) {
+        resolve(null);
+        return;
       }
 
-      const rooms = Array.isArray(response?.rooms)
-        ? response.rooms.filter((room): room is string => typeof room === 'string')
-        : [];
+      const tempIndex = incrementResponseIndex();
+      socket.emit('getJoinedRooms', { responseIndex: tempIndex });
 
-      return resolve(rooms);
-    });
-  })
+      socket.once(`getJoinedRooms-${String(tempIndex)}`, (response?: { error?: string; rooms?: unknown }) => {
+        if (response?.error) {
+          if (dev) {
+            console.error(response.error);
+            notify.error({ key: response.error });
+          }
+          resolve(null);
+          return;
+        }
+
+        const rooms = Array.isArray(response?.rooms)
+          ? response.rooms.filter((room): room is string => typeof room === 'string')
+          : [];
+
+        resolve(rooms);
+      });
+    })();
+  });
 }
 
 export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
-  if (!location.pathName || !location.searchParams) {
+  if (!location.pathName) {
     if (dev) {
       console.error("Invalid location");
-      toast.error("Invalid location");
+      notify.error({ key: 'common.invalidLocation' });
     }
     return null;
   }
 
-  if (!await waitForSocket()) { return }
+  if (!await waitForSocket()) { return null; }
   if (!socket) { return null; }
 
   socket.emit('updateLocation', location);
+  return null;
 }

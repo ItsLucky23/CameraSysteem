@@ -1,5 +1,5 @@
 import { dev, SessionLayout } from "config";
-import { toast } from "sonner";
+import notify from "src/_functions/notify";
 import { incrementResponseIndex, socket, waitForSocket } from "./socketInitializer";
 import { statusContent } from "src/_providers/socketStatusProvider";
 import { Dispatch, RefObject, SetStateAction, useCallback, useEffect, useRef } from "react";
@@ -29,11 +29,11 @@ type UnionToIntersection<U> =
 // All possible sync names across all pages
 type SyncRouteRecord = UnionToIntersection<{
   [P in keyof SyncTypeMap]: {
-    [N in keyof SyncTypeMap[P] as `${P & string}/${N & string}`]: SyncTypeMap[P][N]
+    [N in keyof SyncTypeMap[P] as `${Extract<P, string>}/${Extract<N, string>}`]: SyncTypeMap[P][N]
   }
 }[keyof SyncTypeMap]>;
 
-type SyncFullName = keyof SyncRouteRecord & string;
+type SyncFullName = Extract<keyof SyncRouteRecord, string>;
 type VersionsForFullName<F extends SyncFullName> = keyof SyncRouteRecord[F] & string;
 
 type ClientInputForFullName<F extends SyncFullName, V extends VersionsForFullName<F>> = SyncRouteRecord[F][V] extends { clientInput: infer I }
@@ -67,20 +67,21 @@ type SyncParamsForFullName<
     ignoreSelf?: boolean;
   };
 
-type RuntimeSyncParams = {
+interface RuntimeSyncParams {
   name?: string;
   version?: string;
   data?: unknown;
   receiver?: string;
   ignoreSelf?: boolean;
-};
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Sync Event Callbacks Registry
 // ═══════════════════════════════════════════════════════════════════════════════
 
 type SyncEventCallback = (params: { clientOutput: unknown; serverOutput: unknown }) => void;
-const syncEvents: Record<string, SyncEventCallback[]> = {};
+const syncEvents: Partial<Record<string, SyncEventCallback[]>> = {};
+const noop = () => null;
 
 type SyncLifecycleHandlers = {
   connect: () => void;
@@ -93,6 +94,34 @@ type SyncLifecycleHandlers = {
 
 let activeLifecycleHandlers: SyncLifecycleHandlers | null = null;
 
+const canSendNow = (socketInstance: Socket) => {
+  if (!socketInstance.connected) return false;
+  return isOnline();
+};
+
+const createQueueId = () => {
+  return `${String(Date.now())}-${String(Math.random())}`;
+};
+
+const getCallbacksForRoute = (route: string): SyncEventCallback[] => {
+  syncEvents[route] ??= [];
+  return syncEvents[route];
+};
+
+const triggerSyncCallbacks = (name: string, clientOutput: unknown, serverOutput: unknown) => {
+  const callbacks = syncEvents[name] ?? [];
+  if (callbacks.length === 0) {
+    if (dev) {
+      console.warn(`Sync event ${name} has no registered callback on this page`);
+    }
+    return;
+  }
+
+  for (const callback of callbacks) {
+    callback({ clientOutput, serverOutput });
+  }
+};
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // syncRequest Function Overloads
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -101,16 +130,15 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
   params: SyncParamsForFullName<F, V>
 ): Promise<boolean> {
   const runtimeParams = params as RuntimeSyncParams;
-  const { name, version, ignoreSelf } = runtimeParams;
+  const { name, version, receiver, ignoreSelf } = runtimeParams;
   const payloadData = runtimeParams.data;
-  const receiver = runtimeParams.receiver;
 
   return new Promise((resolve) => {
     void (async () => {
       if (!name || typeof name !== "string") {
         if (dev) {
           console.error("Invalid name for syncRequest");
-          toast.error("Invalid name for syncRequest");
+          notify.error({ key: 'sync.invalidName' });
         }
         resolve(false);
         return;
@@ -121,7 +149,7 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
       if (!version || typeof version !== 'string') {
         if (dev) {
           console.error("Invalid version for syncRequest");
-          toast.error("Invalid version for syncRequest");
+          notify.error({ key: 'sync.invalidVersion' });
         }
         resolve(false);
         return;
@@ -130,7 +158,7 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
       if (!receiver) {
         if (dev) {
           console.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
-          toast.error("You need to provide a receiver for syncRequest, this can be either 'all' to trigger all sockets which we do not recommend or it can be any value such as a code e.g 'Ag2cg4'. this works together with the joinRoom and leaveRoom function");
+          notify.error({ key: 'sync.missingReceiver' });
         }
         resolve(false);
         return;
@@ -149,16 +177,9 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
       const fullName = `sync/${sanitizedName}/${version}`;
       let queueId: string | null = null;
 
-      const canSendNow = (s: Socket) => {
-        if (!s.connected) return false;
-        return isOnline();
-      };
-
       const runRequest = (socketInstance: Socket) => {
         if (!canSendNow(socketInstance)) {
-          if (!queueId) {
-            queueId = `${Date.now()}-${Math.random()}`;
-          }
+          queueId ??= createQueueId();
           enqueueSyncRequest({
             id: queueId,
             key: fullName,
@@ -178,7 +199,13 @@ export function syncRequest<F extends SyncFullName, V extends VersionsForFullNam
           if (responseData.status === "error") {
             if (dev) {
               console.error(`Sync ${sanitizedName} failed: ${responseData.message}`);
-              toast.error(`Sync ${sanitizedName} failed: ${responseData.message}`);
+              notify.error({
+                key: 'sync.failedRequest',
+                params: [
+                  { key: 'name', value: sanitizedName },
+                  { key: 'message', value: responseData.message },
+                ],
+              });
             }
             resolve(false);
             return;
@@ -218,38 +245,38 @@ export const useSyncEvents = () => {
     if (!params.name || typeof params.name !== 'string') {
       if (dev) {
         console.error("Invalid name for upsertSyncEventCallback");
-        toast.error("Invalid name for upsertSyncEventCallback");
+        notify.error({ key: 'sync.invalidName' });
       }
-      return () => { return; };
+      return noop;
     }
 
     if (!params.version || typeof params.version !== 'string') {
       if (dev) {
         console.error("Invalid version for upsertSyncEventCallback");
-        toast.error("Invalid version for upsertSyncEventCallback");
+        notify.error({ key: 'sync.invalidVersion' });
       }
-      return () => { return; };
+      return noop;
     }
 
     if (typeof params.callback !== 'function') {
       if (dev) {
         console.error("Invalid callback for upsertSyncEventCallback");
-        toast.error("Invalid callback for upsertSyncEventCallback");
+        notify.error({ key: 'sync.invalidCallback' });
       }
-      return () => { return; };
+      return noop;
     }
 
     const sanitizedName = params.name.replaceAll(/^\/+|\/+$/g, '');
     const fullName = `sync/${sanitizedName}/${params.version}`;
-    const callbacks = syncEvents[fullName] ?? [];
     const callback = params.callback as unknown as SyncEventCallback;
+    const callbacks = getCallbacksForRoute(fullName);
 
     const previousForRoute = localRegistryRef.current.get(fullName);
     if (previousForRoute) {
       syncEvents[fullName] = callbacks.filter((cb) => cb !== previousForRoute);
     }
 
-    const nextCallbacks = syncEvents[fullName] ?? [];
+    const nextCallbacks = getCallbacksForRoute(fullName);
     nextCallbacks.push(callback);
     syncEvents[fullName] = nextCallbacks;
     localRegistryRef.current.set(fullName, callback);
@@ -262,12 +289,8 @@ export const useSyncEvents = () => {
     }
 
     return () => {
-      const current = syncEvents[fullName];
-      if (!current) return;
+      const current = getCallbacksForRoute(fullName);
       syncEvents[fullName] = current.filter((cb) => cb !== callback);
-      if (syncEvents[fullName].length === 0) {
-        delete syncEvents[fullName];
-      }
 
       if (localRegistryRef.current.get(fullName) === callback) {
         localRegistryRef.current.delete(fullName);
@@ -276,16 +299,14 @@ export const useSyncEvents = () => {
   }, []);
 
   useEffect(() => {
+    const localRegistry = localRegistryRef.current;
+
     return () => {
-      for (const [fullName, callback] of localRegistryRef.current.entries()) {
-        const current = syncEvents[fullName];
-        if (!current) continue;
+      for (const [fullName, callback] of localRegistry.entries()) {
+        const current = getCallbacksForRoute(fullName);
         syncEvents[fullName] = current.filter((cb) => cb !== callback);
-        if (syncEvents[fullName].length === 0) {
-          delete syncEvents[fullName];
-        }
       }
-      localRegistryRef.current.clear();
+      localRegistry.clear();
     };
   }, []);
 
@@ -293,22 +314,9 @@ export const useSyncEvents = () => {
 }
 
 export const useSyncEventTrigger = () => {
-
-  const triggerSyncEvent = (name: string, clientOutput: unknown = {}, serverOutput: unknown = {}) => {
-    const callbacks = syncEvents[name];
-    if (!callbacks || callbacks.length === 0) {
-      if (dev) {
-        console.warn(`Sync event ${name} has no registered callback on this page`);
-      }
-      return;
-    }
-    
-    for (const cb of callbacks) {
-      if (typeof cb === 'function') {
-        cb({ clientOutput, serverOutput });
-      }
-    }
-  }
+  const triggerSyncEvent = useCallback((name: string, clientOutput: unknown = {}, serverOutput: unknown = {}) => {
+    triggerSyncCallbacks(name, clientOutput, serverOutput);
+  }, []);
 
   return { triggerSyncEvent }
 }
@@ -323,7 +331,7 @@ export const initSyncRequest = async ({
       [userId: string]: statusContent;
     }>
   >;
-  sessionRef: RefObject<SessionLayout> | null;
+  sessionRef: RefObject<SessionLayout | null> | null;
 }) => {
 
   if (!await waitForSocket()) { return; }
@@ -376,7 +384,7 @@ export const initSyncRequest = async ({
 
   //? will not trigger when you call this event
   const userAfk = ({ userId, endTime }: { userId: string; endTime?: number }) => {
-    if (userId == sessionRef.current?.id) {
+    if (sessionRef.current !== null && userId === sessionRef.current.id) {
       setSocketStatus(prev => ({
         ...prev,
         self: {
@@ -421,7 +429,7 @@ export const initSyncRequest = async ({
     }));
     if (dev) {
       console.error(`Connection error: ${err.message}`);
-      toast.error(`Connection error: ${err.message}`);
+      notify.error({ key: 'common.connectionError' });
     }
   };
 
