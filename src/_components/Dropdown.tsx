@@ -74,7 +74,7 @@ export default function Dropdown({
   value,
   className = "",
   menuClassName = "",
-  size = "md",
+  size,
   showSearch = false,
   searchPlaceholder = "Search...",
   noResultsText = "No results",
@@ -100,6 +100,12 @@ export default function Dropdown({
     lg: { minWidthPx: 320, triggerWidth: "w-80", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
     xl: { minWidthPx: 420, triggerWidth: "w-[420px]", option: "px-2.5 py-1.5 text-sm", icon: "text-xs" },
   };
+
+  const selectedSizeConfig = size ? sizeConfig[size] : undefined;
+  const containerWidthClass = selectedSizeConfig ? "inline-flex" : "flex w-full";
+  const triggerWidthClass = selectedSizeConfig?.triggerWidth ?? "w-full";
+  const optionClass = selectedSizeConfig?.option ?? sizeConfig.md.option;
+  const iconClass = selectedSizeConfig?.icon ?? sizeConfig.md.icon;
 
   const normalizedOptions: NormalizedOption[] = items.map((item, index) => {
     if (isDropdownObjectItem(item)) {
@@ -337,7 +343,7 @@ export default function Dropdown({
     <div
       ref={dropdownRef}
       className={`
-        relative inline-flex max-w-full
+        relative max-w-full ${containerWidthClass}
         ${className}
       `}
     >
@@ -351,9 +357,9 @@ export default function Dropdown({
           }
         }}
         className={`
-          flex min-w-0 items-center justify-between gap-3 rounded-md border border-container1-border
+          flex w-full min-w-0 items-center justify-between gap-3 rounded-md border border-container1-border
           bg-container1 transition-colors hover:bg-container1-hover cursor-pointer select-none
-          px-2.5 py-2 text-sm ${sizeConfig[size].triggerWidth}
+          px-2.5 py-2 text-sm ${triggerWidthClass}
         `}
         aria-expanded={isOpen}
         aria-haspopup="listbox"
@@ -365,7 +371,7 @@ export default function Dropdown({
 
         <FontAwesomeIcon
           icon={faCaretDown}
-          className={`${sizeConfig[size].icon} text-common transition-transform duration-300 ${
+          className={`${iconClass} text-common transition-transform duration-300 ${
             isOpen ? "rotate-180" : ""
           }`}
         />
@@ -377,7 +383,7 @@ export default function Dropdown({
           style={{
             top: menuPosition.top,
             left: menuPosition.left,
-            width: Math.max(menuPosition.width, sizeConfig[size].minWidthPx),
+            width: selectedSizeConfig ? Math.max(menuPosition.width, selectedSizeConfig.minWidthPx) : menuPosition.width,
           }}
           className={`
             fixed z-[9999] rounded-md
@@ -417,7 +423,7 @@ export default function Dropdown({
                   className={`
                     flex w-full items-center justify-between gap-2 rounded-sm text-left transition-colors
                     border border-transparent
-                    ${sizeConfig[size].option}
+                    ${optionClass}
                     ${option.disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}
                     ${isSelected ? "bg-container2 border-container2-border text-title font-medium" : "hover:bg-container1-hover text-title"}
                   `}
