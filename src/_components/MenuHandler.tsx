@@ -74,7 +74,7 @@ const SlideInWrapper = ({ children, options, isTop, isClosing, soonIsTop }: Slid
 
   return (
     <div
-      className={`w-full overflow-hidden absolute flex flex-col text-text-primary transition-all duration-200 origin-center
+      className={`${isTop ? 'relative' : 'absolute inset-0'} flex min-h-0 w-full flex-col overflow-y-auto text-text-primary transition-all duration-200 origin-center
         ${isVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}
         ${options.background ?? ''}
       `}
@@ -192,48 +192,6 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
     ? { sm: '384px', md: '512px', lg: '768px' }[stackTop.options.size]
     : '384px';
 
-  const [lastChildHeight, setLastChildHeight] = useState<number>(0);
-
-  const updateLastChildHeight = useCallback(() => {
-    const target = document.querySelector('#MENUHANDLER');
-    const lastChild = target?.lastElementChild;
-    if (!(lastChild instanceof HTMLElement)) {
-      setLastChildHeight(0);
-      return;
-    }
-
-    const maxHeight = window.innerHeight * 0.9;
-    const height = Math.min(lastChild.clientHeight, maxHeight);
-    setLastChildHeight(height);
-  }, []);
-
-  useLayoutEffect(() => {
-    updateLastChildHeight();
-
-    const target = document.querySelector('#MENUHANDLER');
-    if (!(target instanceof HTMLElement)) return;
-
-    const observer = new ResizeObserver(() => {
-      updateLastChildHeight();
-    });
-
-    observer.observe(target);
-    const lastChild = target.lastElementChild;
-    if (lastChild instanceof HTMLElement) {
-      observer.observe(lastChild);
-    }
-
-    const onResize = () => {
-      updateLastChildHeight();
-    };
-    window.addEventListener('resize', onResize);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', onResize);
-    };
-  }, [stack.length, updateLastChildHeight]);
-
   const contextValue = useMemo(() => ({
     open, replace, close, closeAll, logStack
   }), [open, replace, close, closeAll, logStack]);
@@ -252,6 +210,23 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
       setMenuHandlerRef(null);
     });
   }, []);
+
+  useEffect(() => {
+    if (stack.length === 0) return;
+
+    const html = document.documentElement;
+    const body = document.body;
+    const previousHtmlOverflow = html.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+
+    html.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+
+    return () => {
+      html.style.overflow = previousHtmlOverflow;
+      body.style.overflow = previousBodyOverflow;
+    };
+  }, [stack.length]);
 
   useEffect(() => {
     if (stack.length === 0) return;
@@ -292,8 +267,8 @@ export function MenuHandlerProvider({ children }: { children: ReactNode }) {
           <div
             role="presentation"
             id="MENUHANDLER"
-            className={`rounded-md overflow-hidden relative transition-all duration-200 ${stackTop?.isClosing ? 'scale-95 opacity-0 pointer-events-none' : 'scale-100 opacity-100'}`}
-            style={{ width: sizeClass, height: `${String(lastChildHeight)}px` }}
+            className={`relative flex min-h-0 flex-col overflow-hidden rounded-md transition-all duration-200 max-h-[90vh] ${stackTop && !stackTop.isClosing ? 'scale-100 opacity-100' : 'scale-95 opacity-0 pointer-events-none'}`}
+            style={{ width: sizeClass }}
             onMouseDown={(e) => { e.stopPropagation(); }}
             onMouseUp={(e) => { e.stopPropagation(); }}
             onKeyDown={(e) => { e.stopPropagation(); }}
