@@ -10,5 +10,460 @@ NPM package modularization - Split into @luckystack/*
   @luckystack/sync          # syncRequest, sync handler system, rooms
   @luckystack/session       # Redis sessions, OAuth providers, auth middleware
   @luckystack/react         # SessionProvider, SocketStatusProvider, hooks
-  @luckystack/cli           # Dev server, type generation, hot reload
+  @luckystack/cli           # Dev server, type generation, hot reload ( maybe dev dependency )
 Session storage abstraction - Support PostgreSQL/JWT
+
+
+
+
+
+
+
+
+
+
+
+LuckyStack Next Plan - Package Abstraction + Microservice Architecture
+
+Last updated: 2026-03-22
+Status: Planning document (implementation not started)
+
+===============================================================================
+1) Why we are doing this
+===============================================================================
+
+Current state:
+- LuckyStack is productive, but mostly ships as one large integrated framework.
+- Even if an app only needs part of the stack, most runtime/dev tooling is still loaded together.
+- Splitting app domains into separate deployable services is possible today, but expensive because
+  each service tends to carry full boilerplate.
+
+Target state:
+- Users install only what they need.
+- Framework core stays thin, optional features become plugins/modules.
+- Route handling, sessions, auth, sync, and presence can be deployed as independent services.
+- Multi-service deployments reduce memory/cpu footprint per service and improve scaling behavior.
+
+
+===============================================================================
+2) Core product goals
+===============================================================================
+
+G1. Modular package consumption
+- A project can use only transport + contracts, without auth/session/react if not needed.
+
+G2. Stable contracts between modules
+- API/sync payload contracts are shared and versioned independently from runtime implementation.
+
+G3. Optional feature modules
+- Features currently controlled by config flags (for example socket activity broadcaster,
+  location syncing) become optional modules with explicit registration.
+
+G4. Microservice-native deployment model
+- Domain services can own subsets of routes/events and run minimal required framework components.
+
+G5. Backwards-compatible migration path
+- Existing monolith projects keep working while gradually moving to modular setup.
+
+
+===============================================================================
+3) Non-goals (for first implementation)
+===============================================================================
+
+- Full distributed transaction framework across services.
+- Automatic data consistency guarantees between independent service databases.
+- Mandatory Kubernetes-only architecture.
+- Removing monolith mode.
+
+
+===============================================================================
+4) Current architectural pain points to fix first
+===============================================================================
+
+P1. Hardcoded project tree assumptions
+- Dev tooling and loaders assume one app root with src/server/shared layout.
+- Needed change: route roots and function roots become configurable, with defaults matching current behavior.
+
+P2. Feature flags tightly coupled to runtime internals
+- socketActivityBroadcaster and locationProviderEnabled currently gate logic inside core lifecycle.
+- Needed change: move feature logic into plugins/modules; core only exposes lifecycle hooks.
+
+P3. Storage and auth are implementation-coupled
+- Session/auth logic tied to Redis + Prisma expectations.
+- Needed change: define interfaces (SessionStore, UserRepository, TokenStrategy) and provide adapters.
+
+P4. Dev/prod route resolution split in two models
+- Dynamic dev maps and generated prod maps exist separately.
+- Needed change: one route loader abstraction with multiple implementations.
+
+P5. Typegen/template injection assumes monolith source root
+- Works for one app tree, blocks package-provided route modules.
+- Needed change: typegen accepts one or more route roots (default remains src).
+
+
+===============================================================================
+5) Package strategy
+===============================================================================
+
+Important product decision:
+- External package list should stay simple.
+- Internal architecture can still be separated for maintainability.
+
+Recommended strategy:
+
+5.1 Public package layout (simple for users)
+- @luckystack/core
+  - Main entry point for server + client runtime primitives
+  - Subpath exports:
+    - @luckystack/core/server
+    - @luckystack/core/client
+    - @luckystack/core/contracts
+    - @luckystack/core/devkit
+- @luckystack/react
+  - React providers/hooks/components integration
+- @luckystack/session
+  - Session manager + adapters (redis, postgres, jwt, memory)
+- @luckystack/auth
+  - Credentials/OAuth flows with pluggable repositories
+- @luckystack/presence
+  - Socket activity broadcaster + presence utilities
+- @luckystack/observability
+  - Logging, metrics, tracing instrumentation adapters
+
+5.2 Internal module boundaries (inside packages)
+- contracts module: request/response protocols, shared route metadata, error codes
+- routing module: route provider + route loader interfaces
+- transport module: socket/http server-client transport
+- plugin module: lifecycle hooks + capability registration
+- devkit module: typegen, template injection, route discovery, hot reload
+
+Why this shape:
+- Keeps user-facing installation simple.
+- Preserves strict internal separation so modules can evolve independently.
+
+
+===============================================================================
+6) Contracts-first design
+===============================================================================
+
+6.1 Contract package responsibilities
+- Shared types for API/sync request + response envelopes.
+- Route metadata types and versioning primitives.
+- Shared error contract:
+  - status: success | error
+  - errorCode
+  - errorParams
+  - optional httpStatus
+
+6.2 Contract evolution rules
+- Breaking changes require version bump and compatibility notes.
+- Route versions remain explicit (v1, v2, ...).
+- No runtime-only fields may be required by contracts.
+
+6.3 Generated type output target
+- Generated files should map to contract primitives, not implementation internals.
+- Generated maps must support multiple route roots.
+
+
+===============================================================================
+7) Plugin system (replace config-driven hard coupling)
+===============================================================================
+
+7.1 Core lifecycle hooks
+- onServerStart
+- onSocketConnect
+- onSocketDisconnect
+- onApiRequestBefore/After
+- onSyncRequestBefore/After
+- onRouteReload
+
+7.2 Capability model
+- Core asks plugins for capabilities at startup.
+- Example capabilities:
+  - supportsPresence
+  - supportsLocationTracking
+  - supportsSessionBroadcast
+
+7.3 Socket activity broadcaster as plugin
+- @luckystack/presence registers socket lifecycle handlers.
+- If plugin not installed, no presence code runs.
+- Removes core dependency on broadcaster internals.
+
+7.4 Location sync as plugin/feature module
+- Keep session type stable with optional location field.
+- Runtime decides whether location update events are accepted.
+
+
+===============================================================================
+8) Routing abstraction for monolith + packages + microservices
+===============================================================================
+
+8.1 Route provider interface
+- Input: configured route roots
+- Output: discovered API/sync route files + metadata
+
+8.2 Defaults (for backwards compatibility)
+- routeRoots = ["src"]
+- apiFolder = "_api"
+- syncFolder = "_sync"
+
+8.3 Extended mode examples
+- routeRoots = ["src", "node_modules/@my-org/orders-module/src"]
+- routeRoots = ["services/orders/src", "services/billing/src"]
+
+8.4 Route loader interface
+- Dev loader (watch + dynamic import)
+- Static loader (generated artifact for production)
+- Same runtime API consumed by request handlers
+
+
+===============================================================================
+9) Devkit modernization (type generation + template injection)
+===============================================================================
+
+9.1 Typegen must support configurable roots
+- Scan all configured route roots.
+- Merge route maps deterministically.
+- Detect duplicate route names + version collisions clearly.
+
+9.2 Template injection updates
+- Inject only in writable project roots (not node_modules).
+- Respect custom api/sync folder names where configured.
+- Keep current behavior as default when only src is configured.
+
+9.3 Hot reload updates
+- Watch configured route/function/shared roots.
+- Perform targeted reload by dependency graph.
+- Keep current fast incremental behavior.
+
+
+===============================================================================
+10) Session + auth abstraction
+===============================================================================
+
+10.1 Session store interface
+- get(token)
+- set(token, session, ttl)
+- delete(token)
+- listUserTokens(userId)
+
+Adapters:
+- Redis adapter (current behavior)
+- Postgres adapter
+- JWT strategy (stateless mode where applicable)
+- In-memory adapter (dev/tests)
+
+10.2 User repository interface
+- findByEmailProvider
+- createUser
+- updateUser
+- findById
+
+Adapters:
+- Prisma adapter (current behavior)
+- custom adapter contract for app-defined data layer
+
+10.3 Auth strategy interface
+- credentials strategy
+- oauth strategy
+- custom strategy registration
+
+
+===============================================================================
+11) Microservice architecture blueprint
+===============================================================================
+
+11.1 High-level components
+- Edge/Gateway service
+  - socket endpoint, http fallback, auth entry, service routing
+- Domain services (orders, billing, chat, docs, etc.)
+  - own API/sync handlers and domain logic
+- Shared infra services
+  - session store, optional event bus, tracing backend
+
+11.2 Route ownership model
+- Each domain service owns explicit route namespaces.
+- Example:
+  - orders/* handled by orders-service
+  - billing/* handled by billing-service
+
+11.3 Sync event fanout models
+- Option A: gateway-managed fanout
+  - gateway owns room membership + socket fanout
+  - domain services return event payloads to gateway
+- Option B: broker-mediated fanout
+  - domain services publish events to broker
+  - gateway subscribes and pushes to sockets
+
+Preferred initial model: Option A (simpler migration from current architecture).
+
+11.4 Session strategy in microservices
+- Central session service or shared store.
+- Services validate tokens through shared session adapter or introspection endpoint.
+
+11.5 Data ownership
+- Each microservice owns its data schema and persistence.
+- Cross-service reads use API/event contracts, not shared database tables by default.
+
+
+===============================================================================
+12) Performance strategy for microservices
+===============================================================================
+
+Main objective:
+- Avoid running full LuckyStack boilerplate in every service.
+
+How:
+- Gateway runs transport + socket lifecycle + shared concerns.
+- Domain services run only:
+  - route handlers
+  - domain business logic
+  - optional adapters (db, cache)
+- Heavy optional modules (presence, tracing exporters, etc.) loaded only where required.
+
+Expected gains:
+- lower memory per service
+- faster startup for domain workers
+- independent horizontal scaling per domain
+
+
+===============================================================================
+13) Observability workstream (logging/metrics/tracing)
+===============================================================================
+
+13.1 Logging
+- Structured logger interface with context fields (service, route, requestId, userId).
+- Pluggable sinks (console, file, ELK, cloud providers).
+
+13.2 Metrics
+- Prometheus/OpenTelemetry metrics interface.
+- Built-in metrics: request latency, error rate, queue depth, socket count.
+
+13.3 Tracing
+- OpenTelemetry spans across gateway -> service calls.
+- Correlation ID propagation via API/sync envelopes.
+
+
+===============================================================================
+14) Rollout plan (phased)
+===============================================================================
+
+Phase 0 - Documentation alignment
+- Refresh PROJECT_CONTEXT and architecture docs to match current code and target direction.
+
+Phase 1 - Foundations
+- Introduce interfaces: RouteProvider, RouteLoader, SessionStore, UserRepository, Plugin.
+- Add configurable route roots with current defaults.
+
+Phase 2 - Core/package extraction
+- Create @luckystack/core with server/client/contracts/devkit exports.
+- Keep app behavior unchanged.
+
+Phase 3 - Session/auth modularization
+- Move session/auth into dedicated packages using adapters.
+- Provide Redis + Prisma adapters first for compatibility.
+
+Phase 4 - Pluginization of optional features
+- Extract socket activity broadcaster to @luckystack/presence.
+- Extract location sync behavior as optional module.
+
+Phase 5 - Devkit multi-root support
+- Update typegen, template injection, and hot reload to support multiple route roots.
+
+Phase 6 - Microservice runtime
+- Implement gateway + service registration + route ownership map.
+- Run one pilot service extracted from monolith.
+
+Phase 7 - Observability
+- Add @luckystack/observability with logger/metrics/tracing adapters.
+
+Phase 8 - Adoption toolkit
+- CLI scaffolds for monolith mode and microservice mode.
+- migration guides and examples.
+
+
+===============================================================================
+15) Detailed implementation checklist
+===============================================================================
+
+15.1 Config and typing
+- [ ] Stabilize SessionLayout shape (optional location field always allowed)
+- [ ] Replace compile-time feature gating in type definitions
+- [ ] Introduce capability-based runtime checks
+
+15.2 Routing and loaders
+- [ ] Implement route roots configuration object
+- [ ] Refactor loader discovery logic to consume route provider
+- [ ] Refactor request handlers to consume unified route loader
+- [ ] Keep production generated map support via static loader implementation
+
+15.3 Devkit
+- [ ] Typegen scans all route roots
+- [ ] Collision detection for duplicate route/version definitions
+- [ ] Template injector supports configurable folder names and roots
+- [ ] Hot reload watches configured roots and performs scoped reloads
+
+15.4 Session/auth
+- [ ] SessionStore interface and Redis adapter
+- [ ] Postgres/JWT adapters
+- [ ] UserRepository interface and Prisma adapter
+- [ ] Auth strategies registration API
+
+15.5 Plugins
+- [ ] Core plugin registration API
+- [ ] Presence plugin extraction
+- [ ] Location sync plugin extraction
+
+15.6 Microservice runtime
+- [ ] Gateway project template
+- [ ] Domain service template
+- [ ] Route ownership/registry contract
+- [ ] Service-to-gateway transport contract
+- [ ] Pilot extraction (one real domain)
+
+15.7 Observability
+- [ ] Logger interface and default implementation
+- [ ] Metrics interface and default implementation
+- [ ] Tracing context propagation
+
+
+===============================================================================
+16) Risk register and mitigation
+===============================================================================
+
+R1. Breaking existing app conventions
+- Mitigation: default config preserves current src/_api/_sync behavior.
+
+R2. Typegen complexity increases with multi-root scanning
+- Mitigation: deterministic merge order + explicit collision errors.
+
+R3. Microservice debugging complexity
+- Mitigation: strong tracing + request IDs + local compose setup templates.
+
+R4. Performance regressions at gateway
+- Mitigation: benchmark baseline early; add backpressure and pooling strategy.
+
+R5. Too many packages for users
+- Mitigation: keep simple public package story, expose subpath exports, provide presets.
+
+
+===============================================================================
+17) Success criteria
+===============================================================================
+
+SC1. Existing monolith app runs unchanged after core refactor.
+SC2. Optional features can be disabled by not installing plugins (not just boolean flags).
+SC3. Type generation works for at least two route roots.
+SC4. One production-like domain extracted into separate service with lower memory footprint.
+SC5. Docs and migration guides are complete enough for external adopters.
+
+
+===============================================================================
+18) Immediate next action items
+===============================================================================
+
+N1. Finalize package naming and export strategy (core subpath exports vs more public packages).
+N2. Implement route roots configuration + route provider abstraction first.
+N3. Update typegen/hotreload to consume route roots config.
+N4. Extract socket activity broadcaster into plugin package boundary.
+N5. Refresh PROJECT_CONTEXT and architecture docs once phase 1 lands.
