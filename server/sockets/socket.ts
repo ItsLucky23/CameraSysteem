@@ -190,6 +190,7 @@ export default function loadSocket(httpServer: any) {
 
     socket.on('updateLocation', async (newLocation) => {
       if (!token) { return; }
+      if (!config.locationProviderEnabled) { return; }
       console.log('updating location to: ', newLocation.pathName, 'yellow')
 
       await withSessionLock(token, async () => {
@@ -202,7 +203,9 @@ export default function loadSocket(httpServer: any) {
         const user = returnedUser || await getSession(token);
         if (!user) { return; }
 
-        user.location = newLocation;
+        const extendedUser = user as SessionLayout & { location?: SessionLayout };
+
+        extendedUser.location = newLocation;
         await saveSession(token, user);
       });
     });

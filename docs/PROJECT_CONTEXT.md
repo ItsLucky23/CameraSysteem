@@ -67,7 +67,7 @@ Handles all real-time communication:
 - **`joinRoom`** - Adds socket to a room (room code appended to session `roomCodes[]`)
 - **`leaveRoom`** - Removes socket from a room (room code removed from session `roomCodes[]`)
 - **`getJoinedRooms`** - Returns current room membership for the socket
-- **`updateLocation`** - Tracks user's current page path
+- **`updateLocation`** - Tracks user's current page path (when `config.locationProviderEnabled` is true)
 - **`disconnect`** - Handles socket disconnection with optional activity broadcasting
 
 ### `server/sockets/handleApiRequest.ts` - API Request Handler

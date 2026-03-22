@@ -86,6 +86,7 @@ const { socketStatus } = useSocketStatus();
 const config = {
   backendUrl: 'http://localhost:80',
   socketActivityBroadcaster: false,  // Enable presence tracking
+  locationProviderEnabled: true,     // Enable route-to-session location syncing
 };
 
 // .env

@@ -5,6 +5,7 @@ import {
   SessionLayout,
   sessionBasedToken,
   socketActivityBroadcaster,
+  locationProviderEnabled,
   loginPageUrl,
 } from "config";
 import notify from "src/_functions/notify";
@@ -342,6 +343,8 @@ export const getJoinedRooms = async () => {
 }
 
 export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
+  if (!locationProviderEnabled) { return null; }
+
   if (!location.pathName) {
     if (dev) {
       console.error("Invalid location");

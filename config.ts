@@ -10,8 +10,8 @@ type AppEnvironmentConfig = {
 const normalizeDns = (dns: string): string => dns.replace(/\/+$/, "");
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
-  "http://localhost:5174": {
-    backendUrl: "http://localhost:81",
+  "http://localhost:5173": {
+    backendUrl: "http://localhost:80",
     dev: true,
     sessionBasedToken: true,
     allowMultipleSessions: true
@@ -100,6 +100,19 @@ const config = {
    * ```
    */
   socketActivityBroadcaster: false,
+
+  /**
+   * Enable route-based location syncing from client to server session.
+   *
+   * When FALSE:
+   * - Client will not emit `updateLocation` on route changes
+   * - Server will skip writing `user.location` updates
+   * - Any logic that depends on `user.location` (for example sync targeting by page) will be inactive
+   *
+   * When TRUE:
+   * - Route changes are synced to the session via `user.location`
+   */
+  locationProviderEnabled: false as const,
  
   /** Default language for notifications and UI (matches files in src/_locales/) */
   defaultLanguage: 'en' as LANGUAGE,
@@ -132,17 +145,24 @@ const config = {
 // TYPE DEFINITIONS
 // ============================================
  
-export interface SessionLayout extends Omit<User, 'password'> {
+export type SessionLocation = {
+  pathName: string;
+  searchParams: {
+    [key: string]: string;
+  };
+};
+
+type SessionLayoutBase = Omit<User, 'password'> & {
   avatarFallback: string;
   token: string;
   roomCodes?: string[];
-  location?: {
-    pathName: string;
-    searchParams: {
-      [key: string]: string;
-    };
-  };
-} 
+};
+
+export type SessionLayout = SessionLayoutBase & (
+  typeof config.locationProviderEnabled extends true
+    ? { location?: SessionLocation }
+    : {}
+);
  
 /**
  * Authentication configuration for API and Sync handlers.
@@ -197,6 +217,7 @@ export const {
   sessionBasedToken,
   sessionExpiryDays,
   socketActivityBroadcaster,
+  locationProviderEnabled,
   rateLimiting,
   pageTitle
 } = config;

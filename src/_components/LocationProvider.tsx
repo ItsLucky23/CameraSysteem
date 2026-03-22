@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 
+import { locationProviderEnabled } from 'config';
 import { updateLocationRequest } from 'src/_sockets/socketInitializer';
 
 const sendLocationUpdate = (pathname: string) => {
@@ -15,6 +16,7 @@ export default function LocationProvider() {
   const location = useLocation();
 
   useEffect(() => {
+    if (!locationProviderEnabled) { return; }
     sendLocationUpdate(location.pathname);
   }, [location.pathname]);
 
