@@ -12,4 +12,3 @@ NPM package modularization - Split into @luckystack/*
   @luckystack/react         # SessionProvider, SocketStatusProvider, hooks
   @luckystack/cli           # Dev server, type generation, hot reload
 Session storage abstraction - Support PostgreSQL/JWT
-Middleware handler client sided redirect for non existing routes (currently we get the page not found error before so we cant map a url like test1232 to test)

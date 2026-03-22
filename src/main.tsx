@@ -12,6 +12,7 @@ import enJson from "src/_locales/en.json"
 
 import { AvatarProvider } from './_components/AvatarProvider'
 import ErrorPage from './_components/ErrorPage';
+import Middleware from './_components/Middleware';
 import { MenuHandlerProvider } from './_components/MenuHandler'
 import TemplateProvider from './_components/TemplateProvider'
 import { TranslationProvider } from './_components/TranslationProvider'
@@ -102,11 +103,23 @@ const pagesUnknown = import.meta.env.PROD ? prodPages : devPages;
 
 const pages: Record<string, PageModule> = pagesUnknown as Record<string, PageModule>;
 
+const routes = getRoutes(pages);
+routes.push({
+  path: '*',
+  element: (
+    <TemplateProvider initialTemplate='plain'>
+      <Middleware>
+        <ErrorPage />
+      </Middleware>
+    </TemplateProvider>
+  )
+});
+
 const router = createBrowserRouter([{
   path: '/',
   element: <LocationProvider />,
   errorElement: <ErrorPage />,
-  children: getRoutes(pages)
+  children: routes
 }])
 
 if (mobileConsole) { new VConsole(); }

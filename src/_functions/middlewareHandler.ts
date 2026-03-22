@@ -36,6 +36,9 @@ export default function middlewareHandler({
         return { redirect: '/login' };
       }
 
+    case '/example':
+      return { redirect: '/examples' };
+
     default:
       return { success: true };
   }
