@@ -3,6 +3,7 @@ import { createContext, use, useState, ReactNode, useEffect, useMemo } from 'rea
 
 import { apiRequest } from 'src/_sockets/apiRequest';
 import { socket, useSocket } from 'src/_sockets/socketInitializer';
+import { setSentryUser } from 'src/_functions/sentry';
 
 import { dev, pageTitle, SessionLayout } from '../../config';
 
@@ -23,6 +24,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     latestSession = session;
   }, [session])
+
+  useEffect(() => {
+    setSentryUser(session?.id ? {
+      id: String(session.id),
+      email: session.email || undefined,
+    } : null);
+  }, [session?.id, session?.email]);
 
   useEffect(() => {
     if (dev && session?.email) {

@@ -8,6 +8,7 @@ import tryCatch from "../../shared/tryCatch";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
 import { validateInputByType } from '../utils/runtimeTypeValidation';
 import { checkRateLimit } from '../utils/rateLimiter';
+import { captureException, setSentryUser, startSpan } from '../functions/sentry';
 
 interface HttpSyncRequestParams {
   name: string;
@@ -59,6 +60,11 @@ export default async function handleHttpSyncRequest({
     extractLanguageFromHeader(xLanguageHeader)
     || extractLanguageFromHeader(acceptLanguageHeader);
   const user = await getSession(token);
+  setSentryUser(user?.id ? {
+    id: String(user.id),
+    email: user.email || undefined,
+  } : null);
+  const span = startSpan(name, 'sync.request.http') as { end?: () => void } | undefined;
 
   const buildSyncError = ({
     response,
@@ -95,232 +101,244 @@ export default async function handleHttpSyncRequest({
     };
   };
 
-  if (!ioInstance) {
-    return buildSyncError({
-      response: { status: 'error', errorCode: 'sync.ioUnavailable' },
-      preferred: preferredLocale,
-      userLanguage: user?.language,
-    });
-  }
-
-  if (!name || typeof name !== 'string') {
-    return buildSyncError({
-      response: { status: 'error', errorCode: 'sync.invalidRequest' },
-      preferred: preferredLocale,
-      userLanguage: user?.language,
-    });
-  }
-
-  if (!receiver || typeof receiver !== 'string') {
-    return buildSyncError({
-      response: { status: 'error', errorCode: 'sync.missingReceiver' },
-      preferred: preferredLocale,
-      userLanguage: user?.language,
-    });
-  }
-
-  const { syncObject, functionsObject } = await getRuntimeSyncMaps();
-  const nameSegments = name.split('/').filter(Boolean);
-  const syncBaseName = nameSegments[nameSegments.length - 2];
-  const requestedVersion = nameSegments[nameSegments.length - 1];
-  const callbackName = typeof cb === 'string' && cb.trim().length > 0
-    ? cb.trim()
-    : `${syncBaseName}/${requestedVersion}`;
-
-  let resolvedName = name;
-  if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`] && syncBaseName && requestedVersion) {
-    const rootKey = `sync/${syncBaseName}/${requestedVersion}`;
-    if (syncObject[`${rootKey}_client`] || syncObject[`${rootKey}_server`]) {
-      resolvedName = rootKey;
-    }
-  }
-
-  if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
-    return buildSyncError({
-      response: { status: 'error', errorCode: 'sync.notFound' },
-      preferred: preferredLocale,
-      userLanguage: user?.language,
-    });
-  }
-
-  // Rate limiting for HTTP sync requests
-  const effectiveSyncLimit = config.rateLimiting.defaultApiLimit;
-  if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
-    const requesterIdentity = token ?? requesterIp ?? 'anonymous';
-    const keyPrefix = token ? 'token' : 'ip';
-
-    const { allowed, resetIn } = checkRateLimit({
-      key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
-      limit: effectiveSyncLimit,
-      windowMs: config.rateLimiting.windowMs,
-    });
-
-    if (!allowed) {
+  try {
+    if (!ioInstance) {
       return buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: 'sync.rateLimitExceeded',
-          errorParams: [{ key: 'seconds', value: resetIn }],
-          httpStatus: 429,
-        },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      });
-    }
-  }
-
-  if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
-    const ipBucket = requesterIp ?? 'unknown';
-    const { allowed, resetIn } = checkRateLimit({
-      key: `ip:${ipBucket}:sync:all`,
-      limit: config.rateLimiting.defaultIpLimit,
-      windowMs: config.rateLimiting.windowMs,
-    });
-
-    if (!allowed) {
-      return buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: 'sync.rateLimitExceeded',
-          errorParams: [{ key: 'seconds', value: resetIn }],
-          httpStatus: 429,
-        },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
-      });
-    }
-  }
-
-  let serverOutput = {};
-  if (syncObject[`${resolvedName}_server`]) {
-    const { auth, main: serverMain, inputType, inputTypeFilePath } = syncObject[`${resolvedName}_server`];
-
-    const inputValidation = await validateInputByType({
-      typeText: inputType,
-      value: data,
-      rootKey: 'clientInput',
-      filePath: inputTypeFilePath,
-    });
-    if (inputValidation.status === 'error') {
-      return buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: 'sync.invalidInputType',
-          errorParams: [{ key: 'message', value: inputValidation.message }],
-        },
+        response: { status: 'error', errorCode: 'sync.ioUnavailable' },
         preferred: preferredLocale,
         userLanguage: user?.language,
       });
     }
 
-    if (auth.login && !user?.id) {
+    if (!name || typeof name !== 'string') {
       return buildSyncError({
-        response: { status: 'error', errorCode: 'auth.required' },
-        preferred: preferredLocale,
-      });
-    }
-
-    const validationResult = validateRequest({ auth, user: user as SessionLayout });
-    if (validationResult.status === 'error') {
-      return buildSyncError({
-        response: {
-          status: 'error',
-          errorCode: validationResult.errorCode || 'auth.forbidden',
-          errorParams: validationResult.errorParams,
-          httpStatus: validationResult.httpStatus,
-        },
+        response: { status: 'error', errorCode: 'sync.invalidRequest' },
         preferred: preferredLocale,
         userLanguage: user?.language,
       });
     }
 
-    const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }));
-    if (serverSyncError) {
+    if (!receiver || typeof receiver !== 'string') {
       return buildSyncError({
-        response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+        response: { status: 'error', errorCode: 'sync.missingReceiver' },
         preferred: preferredLocale,
         userLanguage: user?.language,
       });
     }
 
-    if (serverSyncResult?.status == 'error') {
+    const { syncObject, functionsObject } = await getRuntimeSyncMaps();
+    const nameSegments = name.split('/').filter(Boolean);
+    const syncBaseName = nameSegments[nameSegments.length - 2];
+    const requestedVersion = nameSegments[nameSegments.length - 1];
+    const callbackName = typeof cb === 'string' && cb.trim().length > 0
+      ? cb.trim()
+      : `${syncBaseName}/${requestedVersion}`;
+
+    let resolvedName = name;
+    if (!syncObject[`${name}_client`] && !syncObject[`${name}_server`] && syncBaseName && requestedVersion) {
+      const rootKey = `sync/${syncBaseName}/${requestedVersion}`;
+      if (syncObject[`${rootKey}_client`] || syncObject[`${rootKey}_server`]) {
+        resolvedName = rootKey;
+      }
+    }
+
+    if (!syncObject[`${resolvedName}_client`] && !syncObject[`${resolvedName}_server`]) {
       return buildSyncError({
-        response: serverSyncResult,
+        response: { status: 'error', errorCode: 'sync.notFound' },
         preferred: preferredLocale,
         userLanguage: user?.language,
       });
     }
 
-    if (serverSyncResult?.status !== 'success') {
-      return buildSyncError({
-        response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
-        preferred: preferredLocale,
-        userLanguage: user?.language,
+    // Rate limiting for HTTP sync requests
+    const effectiveSyncLimit = config.rateLimiting.defaultApiLimit;
+    if (effectiveSyncLimit !== false && effectiveSyncLimit > 0) {
+      const requesterIdentity = token ?? requesterIp ?? 'anonymous';
+      const keyPrefix = token ? 'token' : 'ip';
+
+      const { allowed, resetIn } = checkRateLimit({
+        key: `${keyPrefix}:${requesterIdentity}:sync:${resolvedName}`,
+        limit: effectiveSyncLimit,
+        windowMs: config.rateLimiting.windowMs,
       });
-    }
 
-    serverOutput = serverSyncResult;
-  }
-
-  const sockets = receiver === 'all'
-    ? ioInstance.sockets.sockets
-    : ioInstance.sockets.adapter.rooms.get(receiver);
-
-  if (!sockets) {
-    return buildSyncError({
-      response: { status: 'error', errorCode: 'sync.noReceiversFound' },
-      preferred: preferredLocale,
-      userLanguage: user?.language,
-    });
-  }
-
-  for (const socketEntry of sockets) {
-    const tempSocket = receiver === 'all'
-      ? (socketEntry as [string, any])[1]
-      : ioInstance.sockets.sockets.get(socketEntry as string);
-
-    if (!tempSocket) continue;
-
-    const tempToken = extractTokenFromSocket(tempSocket);
-
-    if (ignoreSelf && token && token === tempToken) {
-      continue;
-    }
-
-    if (syncObject[`${resolvedName}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }));
-      if (clientSyncError) {
-        tempSocket.emit('sync', {
-          cb: callbackName,
-          fullName: resolvedName,
-          ...buildSyncError({
-            response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
-            preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-          }),
+      if (!allowed) {
+        return buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.rateLimitExceeded',
+            errorParams: [{ key: 'seconds', value: resetIn }],
+            httpStatus: 429,
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
         });
+      }
+    }
+
+    if (config.rateLimiting.defaultIpLimit !== false && config.rateLimiting.defaultIpLimit > 0) {
+      const ipBucket = requesterIp ?? 'unknown';
+      const { allowed, resetIn } = checkRateLimit({
+        key: `ip:${ipBucket}:sync:all`,
+        limit: config.rateLimiting.defaultIpLimit,
+        windowMs: config.rateLimiting.windowMs,
+      });
+
+      if (!allowed) {
+        return buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.rateLimitExceeded',
+            errorParams: [{ key: 'seconds', value: resetIn }],
+            httpStatus: 429,
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+    }
+
+    let serverOutput = {};
+    if (syncObject[`${resolvedName}_server`]) {
+      const { auth, main: serverMain, inputType, inputTypeFilePath } = syncObject[`${resolvedName}_server`];
+
+      const inputValidation = await validateInputByType({
+        typeText: inputType,
+        value: data,
+        rootKey: 'clientInput',
+        filePath: inputTypeFilePath,
+      });
+      if (inputValidation.status === 'error') {
+        return buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: 'sync.invalidInputType',
+            errorParams: [{ key: 'message', value: inputValidation.message }],
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+
+      if (auth.login && !user?.id) {
+        return buildSyncError({
+          response: { status: 'error', errorCode: 'auth.required' },
+          preferred: preferredLocale,
+        });
+      }
+
+      const validationResult = validateRequest({ auth, user: user as SessionLayout });
+      if (validationResult.status === 'error') {
+        return buildSyncError({
+          response: {
+            status: 'error',
+            errorCode: validationResult.errorCode || 'auth.forbidden',
+            errorParams: validationResult.errorParams,
+            httpStatus: validationResult.httpStatus,
+          },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+
+      const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }));
+      if (serverSyncError) {
+        return buildSyncError({
+          response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+
+      if (serverSyncResult?.status == 'error') {
+        return buildSyncError({
+          response: serverSyncResult,
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+
+      if (serverSyncResult?.status !== 'success') {
+        return buildSyncError({
+          response: { status: 'error', errorCode: 'sync.invalidServerResponse' },
+          preferred: preferredLocale,
+          userLanguage: user?.language,
+        });
+      }
+
+      serverOutput = serverSyncResult;
+    }
+
+    const sockets = receiver === 'all'
+      ? ioInstance.sockets.sockets
+      : ioInstance.sockets.adapter.rooms.get(receiver);
+
+    if (!sockets) {
+      return buildSyncError({
+        response: { status: 'error', errorCode: 'sync.noReceiversFound' },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      });
+    }
+
+    for (const socketEntry of sockets) {
+      const tempSocket = receiver === 'all'
+        ? (socketEntry as [string, any])[1]
+        : ioInstance.sockets.sockets.get(socketEntry as string);
+
+      if (!tempSocket) continue;
+
+      const tempToken = extractTokenFromSocket(tempSocket);
+
+      if (ignoreSelf && token && token === tempToken) {
         continue;
       }
 
-      if (clientSyncResult?.status === 'error') {
-        tempSocket.emit('sync', {
-          cb: callbackName,
-          fullName: resolvedName,
-          ...buildSyncError({
-            response: ensureSyncErrorShape(clientSyncResult),
-            preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-          }),
-        });
-        continue;
-      }
+      if (syncObject[`${resolvedName}_client`]) {
+        const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }));
+        if (clientSyncError) {
+          tempSocket.emit('sync', {
+            cb: callbackName,
+            fullName: resolvedName,
+            ...buildSyncError({
+              response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
+              preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
+            }),
+          });
+          continue;
+        }
 
-      if (clientSyncResult?.status !== 'success') {
+        if (clientSyncResult?.status === 'error') {
+          tempSocket.emit('sync', {
+            cb: callbackName,
+            fullName: resolvedName,
+            ...buildSyncError({
+              response: ensureSyncErrorShape(clientSyncResult),
+              preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
+            }),
+          });
+          continue;
+        }
+
+        if (clientSyncResult?.status !== 'success') {
+          tempSocket.emit('sync', {
+            cb: callbackName,
+            fullName: resolvedName,
+            ...buildSyncError({
+              response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
+              preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
+            }),
+          });
+          continue;
+        }
+
         tempSocket.emit('sync', {
           cb: callbackName,
           fullName: resolvedName,
-          ...buildSyncError({
-            response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
-            preferred: extractLanguageFromHeader(tempSocket.handshake.headers['accept-language'] || tempSocket.handshake.headers['x-language']),
-          }),
+          serverOutput,
+          clientOutput: clientSyncResult,
+          message: clientSyncResult.message || `${name} sync success`,
+          status: 'success',
         });
         continue;
       }
@@ -329,22 +347,14 @@ export default async function handleHttpSyncRequest({
         cb: callbackName,
         fullName: resolvedName,
         serverOutput,
-        clientOutput: clientSyncResult,
-        message: clientSyncResult.message || `${name} sync success`,
+        clientOutput: {},
+        message: `${name} sync success`,
         status: 'success',
       });
-      continue;
     }
 
-    tempSocket.emit('sync', {
-      cb: callbackName,
-      fullName: resolvedName,
-      serverOutput,
-      clientOutput: {},
-      message: `${name} sync success`,
-      status: 'success',
-    });
+    return { status: 'success', message: `sync ${name} success` };
+  } finally {
+    span?.end?.();
   }
-
-  return { status: 'success', message: `sync ${name} success` };
 }

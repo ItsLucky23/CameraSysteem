@@ -8,6 +8,7 @@
  */
 
 import * as Sentry from '@sentry/node';
+import config from '../../config';
 import {
   initSharedSentry,
   captureException as sharedCaptureException,
@@ -30,6 +31,7 @@ import {
  */
 export const initializeSentry = () => {
   const dsn = process.env.SENTRY_DSN;
+  const isProduction = process.env.NODE_ENV === 'production';
 
   if (!dsn) {
     if (process.env.NODE_ENV === 'production') {
@@ -43,7 +45,9 @@ export const initializeSentry = () => {
     environment: process.env.NODE_ENV || 'development',
 
     // Performance monitoring
-    tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.2 : 1.0,
+    tracesSampleRate: isProduction
+      ? config.sentry.server.tracesSampleRate.production
+      : config.sentry.server.tracesSampleRate.development,
 
     // Profiling (optional - requires @sentry/profiling-node)
     // profilesSampleRate: 0.1,
@@ -52,7 +56,7 @@ export const initializeSentry = () => {
     serverName: process.env.PROJECT_NAME || "",
 
     // Only send errors in production by default
-    enabled: process.env.NODE_ENV === 'production' || process.env.SENTRY_ENABLED === 'true',
+    enabled: isProduction || process.env.SENTRY_ENABLED === 'true',
 
     // Ignore certain errors
     ignoreErrors: [

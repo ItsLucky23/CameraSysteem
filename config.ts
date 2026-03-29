@@ -139,6 +139,33 @@ const config = {
     /** Request window duration in milliseconds used by both limits. */
     windowMs: 60000,
   },
+
+  /**
+   * Sentry sampling configuration.
+   * Adjust these values to control observability volume and cost.
+   */
+  sentry: {
+    client: {
+      tracesSampleRate: {
+        development: 1,
+        production: 0.2,
+      },
+      replaysSessionSampleRate: {
+        development: 0,
+        production: 0.1,
+      },
+      replaysOnErrorSampleRate: {
+        development: 1,
+        production: 1,
+      },
+    },
+    server: {
+      tracesSampleRate: {
+        development: 1,
+        production: 0.2,
+      },
+    },
+  },
 };
  
 // ============================================
@@ -219,5 +246,6 @@ export const {
   socketActivityBroadcaster,
   locationProviderEnabled,
   rateLimiting,
+  sentry,
   pageTitle
 } = config;

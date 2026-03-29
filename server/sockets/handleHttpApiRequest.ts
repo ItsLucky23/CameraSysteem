@@ -2,7 +2,7 @@ import { apis, functions } from '../prod/generatedApis';
 import { getSession } from '../functions/session';
 import config, { SessionLayout } from '../../config';
 import { validateRequest } from '../utils/validateRequest';
-import { captureException } from '../functions/sentry';
+import { captureException, setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
 import { inferHttpMethod, HttpMethod } from '../utils/httpApiUtils';
 import tryCatch from '../../shared/tryCatch';
@@ -90,6 +90,10 @@ export async function handleHttpApiRequest({
     extractLanguageFromHeader(xLanguageHeader)
     || extractLanguageFromHeader(acceptLanguageHeader);
   const user = await getSession(token);
+  setSentryUser(user?.id ? {
+    id: String(user.id),
+    email: user.email || undefined,
+  } : null);
 
   const buildNetworkError = ({
     response,
@@ -266,9 +270,11 @@ export async function handleHttpApiRequest({
   }
 
   // Execute the API handler
+  const span = startSpan(normalizedName, 'api.request.http') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await main({ data: requestData, user, functions: functionsObject })
   );
+  span?.end?.();
 
   if (error) {
     console.log(`ERROR in HTTP API ${normalizedName}:`, error, 'red');

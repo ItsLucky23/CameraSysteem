@@ -9,6 +9,7 @@ import tryCatch from "../../shared/tryCatch";
 import { extractLanguageFromHeader, normalizeErrorResponse } from "../utils/responseNormalizer";
 import { validateInputByType } from "../utils/runtimeTypeValidation";
 import { checkRateLimit } from "../utils/rateLimiter";
+import { setSentryUser } from '../functions/sentry';
 
 const getRuntimeSyncMaps = async () => {
   if (process.env.NODE_ENV !== 'production') {
@@ -120,6 +121,10 @@ export default async function handleSyncRequest({ msg, socket, token }: {
   console.log(`sync: ${name} called`, 'blue');
 
   const user = await getSession(token);
+  setSentryUser(user?.id ? {
+    id: String(user.id),
+    email: user.email || undefined,
+  } : null);
   const { syncObject, functionsObject } = await getRuntimeSyncMaps();
   const nameSegments = name.split('/').filter(Boolean);
   const syncBaseName = nameSegments[nameSegments.length - 2];

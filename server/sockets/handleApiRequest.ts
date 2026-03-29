@@ -5,7 +5,7 @@ import config, { SessionLayout } from '../../config';
 import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
 import { validateRequest } from '../utils/validateRequest';
-import { captureException } from '../functions/sentry';
+import { captureException, setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
 import tryCatch from '../../shared/tryCatch';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../utils/responseNormalizer';
@@ -43,6 +43,10 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
 
   const { name, data, responseIndex } = msg;
   const user = await getSession(token)
+  setSentryUser(user?.id ? {
+    id: String(user.id),
+    email: user.email || undefined,
+  } : null);
   const preferredLocale =
     extractLanguageFromHeader(socket.handshake.headers['x-language'])
     || extractLanguageFromHeader(socket.handshake.headers['accept-language']);
@@ -220,9 +224,11 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   }
 
   //? Execute the API handler
+  const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
     async () => await main({ data, user, functions: functionsObject })
   );
+  span?.end?.();
 
   if (error) {
     console.log(`ERROR in ${name}:`, error, 'red');

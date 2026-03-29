@@ -9,6 +9,7 @@
 
 import * as Sentry from '@sentry/react';
 import { initSharedSentry } from '../../shared/sentrySetup';
+import config from '../../config';
 
 const env = import.meta.env;
 
@@ -25,6 +26,7 @@ const env = import.meta.env;
  */
 export const initializeSentry = () => {
   const dsn = env.VITE_SENTRY_DSN;
+  const isProduction = env.PROD;
 
   if (!dsn) {
     if (env.PROD) {
@@ -38,11 +40,17 @@ export const initializeSentry = () => {
     environment: env.MODE,
 
     // Performance Monitoring
-    tracesSampleRate: env.PROD ? 0.2 : 1.0,
+    tracesSampleRate: isProduction
+      ? config.sentry.client.tracesSampleRate.production
+      : config.sentry.client.tracesSampleRate.development,
 
     // Session Replay
-    replaysSessionSampleRate: env.PROD ? 0.1 : 0,
-    replaysOnErrorSampleRate: 1.0,
+    replaysSessionSampleRate: isProduction
+      ? config.sentry.client.replaysSessionSampleRate.production
+      : config.sentry.client.replaysSessionSampleRate.development,
+    replaysOnErrorSampleRate: isProduction
+      ? config.sentry.client.replaysOnErrorSampleRate.production
+      : config.sentry.client.replaysOnErrorSampleRate.development,
 
     // Integrations
     integrations: [
@@ -55,7 +63,7 @@ export const initializeSentry = () => {
     ],
 
     // Only send errors in production by default
-    enabled: env.PROD || env.VITE_SENTRY_ENABLED === 'true',
+    enabled: isProduction || env.VITE_SENTRY_ENABLED === 'true',
 
     // Ignore common non-actionable errors
     ignoreErrors: [
