@@ -27,7 +27,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setSentryUser(session?.id ? {
-      id: String(session.id),
+      id: session.id,
       email: session.email || undefined,
     } : null);
   }, [session?.id, session?.email]);
