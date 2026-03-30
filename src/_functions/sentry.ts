@@ -27,9 +27,11 @@ const env = import.meta.env;
 export const initializeSentry = () => {
   const dsn = env.VITE_SENTRY_DSN;
   const isProduction = env.PROD;
+  const runtimeEnvironment = isProduction ? 'production' : 'development';
+  const enabledInDevelopment = env.VITE_SENTRY_ENABLED === 'true';
 
   if (!dsn) {
-    if (env.PROD) {
+    if (isProduction || enabledInDevelopment) {
       console.warn('VITE_SENTRY_DSN not configured. Error monitoring disabled.');
     }
     return;
@@ -37,7 +39,7 @@ export const initializeSentry = () => {
 
   Sentry.init({
     dsn,
-    environment: env.MODE,
+    environment: runtimeEnvironment,
 
     // Performance Monitoring
     tracesSampleRate: isProduction
@@ -63,7 +65,7 @@ export const initializeSentry = () => {
     ],
 
     // Only send errors in production by default
-    enabled: isProduction || env.VITE_SENTRY_ENABLED === 'true',
+    enabled: isProduction || enabledInDevelopment,
 
     // Ignore common non-actionable errors
     ignoreErrors: [
@@ -90,7 +92,7 @@ export const initializeSentry = () => {
   // Initialize shared Sentry instance
   initSharedSentry(Sentry);
 
-  console.log('✅ Sentry initialized for error monitoring');
+  console.log('Sentry initialized for error monitoring');
 };
 
 // Re-export shared capture functions

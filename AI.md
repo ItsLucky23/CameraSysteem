@@ -56,11 +56,11 @@ The AI (you) are responsible for keeping our documentation up to date as the pro
 
 ## 4. Architectural Context via Config Files
 
-When you need to understand the shape of the app's environment, ports, integrations, or session rules, you **MUST** read `.env` and `config.ts` (or their templates `envTemplate.txt` / `configTemplate.txt`).
+When you need to understand the shape of the app's environment, ports, integrations, or session rules, you **MUST** read `.env` and `config.ts` (or their templates `.env_template` / `.env.local_template` / `configTemplate.txt`).
 
-- **`.env`**: Contains safe architecture context (IPs, Ports, flags, mock keys) designed for you to read. Think of this as the AI-readable template.
+- **`.env`**: Contains safe architecture context (IPs, Ports, flags, mock keys) designed for you to read. Think of this as the AI-readable template. Placeholder values such as `ID_IN_ENV_LOCAL` and `SECRET_IN_ENV_LOCAL` are intentional.
 - **`.env.local`**: Contains the **actual** production/secret keys. It is `.gitignored`. The Node `dotenv` server handles merging these files automatically (`.env.local` overrides `.env`). **NEVER read or request to read `.env.local`**, as it contains actual sensitive secrets.
-- **Updating Configs**: If you update `config.ts` or `.env`, you **MUST** also update `configTemplate.txt` and `envTemplate.txt`. Furthermore, if you add a new variable to `.env`, you **MUST** explicitly tell the user to add it to their `.env.local` as well, since the local environment is the main true source that overrides it.
+- **Updating Configs**: If you update `config.ts` or `.env`, you **MUST** also update `configTemplate.txt`, `.env_template`, and `.env.local_template` when relevant. Furthermore, if you add a new variable to `.env`, you **MUST** explicitly tell the user to add it to their `.env.local` as well, since the local environment is the main true source that overrides it.
 
 ## 5. Proactive Suggestions (Your Role as an Engineer)
 

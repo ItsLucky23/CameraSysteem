@@ -49,7 +49,8 @@ git clone https://github.com/ItsLucky23/LuckyStack-v2 PROJECT_NAME
 cd PROJECT_NAME
 
 # Copy environment template
-cp envTemplate.txt .env
+cp .env_template .env
+cp .env.local_template .env.local
 cp configTemplate.txt config.ts
 
 # Start all services (client, server, MongoDB, Redis)
@@ -172,19 +173,27 @@ await syncRequest({
 
 ### Environment Variables
 
-See [`envTemplate.txt`](./envTemplate.txt) for all available options:
+See [`.env_template`](./.env_template) for all available options:
 
 - `NODE_ENV` - development or production
 - `DNS` - Public URL for OAuth redirects
 - `REDIS_HOST` / `REDIS_PASSWORD` / `REDIS_PORT` - Redis connection
 - `DATABASE_URL` - MongoDB connection string
-- `SENTRY_DSN` / `VITE_SENTRY_DSN` - Error monitoring
+- `SENTRY_DSN` / `VITE_SENTRY_DSN` - Error monitoring DSNs (server/client)
+- `SENTRY_ENABLED` / `VITE_SENTRY_ENABLED` - Optional development override
+
+Environment file model:
+
+- `.env_template` and `.env` are safe config context and can contain placeholder values such as `ID_IN_ENV_LOCAL` and `SECRET_IN_ENV_LOCAL`
+- `.env.local_template` is the template for local secrets
+- `.env.local` stores real secrets and overrides `.env` via `dotenv`
+- Keep non-secret server config in `.env` so AI tooling can understand expected keys without exposing real values
 
 ### OAuth Setup
 
 1. Create OAuth apps at each provider
 2. Set callback URLs to `https://your-domain.com/auth/callback/{provider}`
-3. Add client ID/secret to `.env`
+3. Keep placeholders in `.env` and add real client ID/secret values to `.env.local`
 
 Supported: Google, GitHub, Discord, Facebook
 

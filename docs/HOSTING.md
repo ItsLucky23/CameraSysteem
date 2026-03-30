@@ -128,10 +128,11 @@ npm install
 
 Copy the environment template:
 ```bash
-cp envTemplate.txt .env
+cp .env_template .env
+cp .env.local_template .env.local
 ```
 
-Edit `.env` with your settings. **Minimum required for development:**
+Edit `.env` with your non-secret settings. Keep placeholder values like `ID_IN_ENV_LOCAL` and `SECRET_IN_ENV_LOCAL` in `.env`, and put real secrets in `.env.local`. **Minimum required for development:**
 
 ```env
 NODE_ENV=development
@@ -474,7 +475,10 @@ docker-compose up -d --build
 | `REDIS_HOST`               | Yes      | `127.0.0.1`   | Redis server host                        |
 | `REDIS_PORT`               | Yes      | `6379`        | Redis server port                        |
 | `DATABASE_URL`             | Yes      | -             | Database connection string (any Prisma-supported DB) |
-| `SENTRY_DSN`               | No       | -             | Sentry error tracking DSN               |
+| `SENTRY_DSN`               | No       | -             | Server Sentry DSN                        |
+| `SENTRY_ENABLED`           | No       | `false`       | Force-enable server Sentry in development |
+| `VITE_SENTRY_DSN`          | No       | -             | Client Sentry DSN                        |
+| `VITE_SENTRY_ENABLED`      | No       | `false`       | Force-enable client Sentry in development |
 | `GOOGLE_CLIENT_ID`         | No       | -             | Google OAuth client ID                   |
 | `GOOGLE_CLIENT_SECRET`     | No       | -             | Google OAuth client secret               |
 | `GITHUB_CLIENT_ID`         | No       | -             | GitHub OAuth client ID                   |

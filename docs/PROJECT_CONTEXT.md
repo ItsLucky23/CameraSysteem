@@ -20,7 +20,8 @@ The framework is a **custom-built React + Node.js stack** inspired by Next.js bu
 | File                   | Purpose                                                                                        |
 | ---------------------- | ---------------------------------------------------------------------------------------------- |
 | `config.ts`            | Main app configuration (URLs, defaults, session layout). Gitignored - use `configTemplate.txt` |
-| `envTemplate.txt`      | Template for `.env` file with database, OAuth, and server secrets                              |
+| `.env_template`        | Safe `.env` config template with placeholders (for architecture context, no real secrets)      |
+| `.env.local_template`  | Template for `.env.local` secret overrides (real credentials belong in `.env.local`)           |
 | `vite.config.ts`       | Vite bundler config with path aliases (`src/`, `config`) and exclusions for server files       |
 | `index.html`           | Entry point with two root divs: `#root` (app) and `#portalRoot` (modals/overlays z-999999999)  |
 | `redis.conf`           | Redis configuration for session storage                                                        |

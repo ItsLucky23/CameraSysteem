@@ -96,7 +96,7 @@
 
 ### 14. Keep Design Updated
 
-- when updating files that are listed in the .gitignore check if there is a template file for it and update that too. (e.g. .env -> envTemplate.txt or config.ts -> configTemplate.txt)
+- when updating files that are listed in the .gitignore check if there is a template file for it and update that too. (e.g. .env/.env.local -> .env_template/.env.local_template or config.ts -> configTemplate.txt)
 
 ### 15. Type Generation and Template Injection Contract
 
@@ -199,7 +199,8 @@ LuckyStack/
 │
 ├── prisma/schema.prisma       # Database schema (supports MongoDB, MySQL, PostgreSQL, SQLite)
 ├── config.ts                  # App config (gitignored, use configTemplate.txt)
-├── .env                       # Environment vars (gitignored, use envTemplate.txt)
+├── .env                       # Safe environment config with placeholders (use .env_template)
+├── .env.local                 # Local secret overrides (use .env.local_template)
 ├── README.md                  # Framework overview
 └── PROJECT_CONTEXT.md         # Detailed architecture reference
 ```

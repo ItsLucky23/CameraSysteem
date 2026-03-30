@@ -14,11 +14,19 @@ npm install
 
 # Copy config templates
 cp configTemplate.txt config.ts
-cp envTemplate.txt .env
+cp .env_template .env
+cp .env.local_template .env.local
 
-# Edit .env with your credentials
+# Keep placeholders in .env and add real secrets in .env.local
 # Edit config.ts with your settings
 ```
+
+Environment file model:
+
+- `.env` is safe config context for ports, flags, and expected keys
+- `.env` may intentionally contain placeholders like `ID_IN_ENV_LOCAL` and `SECRET_IN_ENV_LOCAL`
+- `.env.local` stores real secrets and overrides `.env`
+- `.env.local_template` shows which secret keys should exist in `.env.local`
 
 ### 2. Start Development
 
@@ -259,7 +267,11 @@ In server terminal, type commands directly:
 
 ### Sentry Integration
 
-Errors are automatically captured if `SENTRY_DSN` is set in `.env`.
+Errors are automatically captured when Sentry DSNs are configured:
+
+- `SENTRY_DSN` for the server
+- `VITE_SENTRY_DSN` for the client
+- `SENTRY_ENABLED` and `VITE_SENTRY_ENABLED` can be set to `true` to force-enable Sentry in development
 
 ---
 

@@ -30,12 +30,13 @@ import {
  * ```
  */
 export const initializeSentry = () => {
-  const dsn = process.env.SENTRY_DSN;
+  const dsn = process.env.SENTRY_DSN || process.env.VITE_SENTRY_DSN;
   const isProduction = process.env.NODE_ENV === 'production';
+  const enabledOverride = process.env.SENTRY_ENABLED ?? process.env.VITE_SENTRY_ENABLED;
 
   if (!dsn) {
     if (process.env.NODE_ENV === 'production') {
-      console.log('⚠️ SENTRY_DSN not configured. Error monitoring disabled.', 'yellow');
+      console.log('SENTRY_DSN not configured. Error monitoring disabled.', 'yellow');
     }
     return;
   }
@@ -56,7 +57,7 @@ export const initializeSentry = () => {
     serverName: process.env.PROJECT_NAME || "",
 
     // Only send errors in production by default
-    enabled: isProduction || process.env.SENTRY_ENABLED === 'true',
+    enabled: isProduction || enabledOverride === 'true',
 
     // Ignore certain errors
     ignoreErrors: [
@@ -77,7 +78,7 @@ export const initializeSentry = () => {
   // Initialize shared Sentry instance for shared utilities
   initSharedSentry(Sentry);
 
-  console.log('✅ Sentry initialized for error monitoring', 'green');
+  console.log('Sentry initialized for error monitoring', 'green');
 };
 
 export const captureException = (
