@@ -37,7 +37,9 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   const unresolvedTypeAliases = new Set<string>();
 
   if (!quiet) {
-    console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`);
+    console.log(' ═══════════════════════════════════════════════════════════════════════════');
+    console.log(' ═══════════════════════════════════════════════════════════════════════════');
+    console.log(`[TypeMapGenerator] Found ${apiFiles.length} API files`, 'cyan');
   }
 
   for (const filePath of apiFiles) {
@@ -87,7 +89,9 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   const syncTypesByPage = new Map<string, Map<string, { clientInput: string; serverOutput: string; clientOutput: string; version: string }>>();
 
   if (!quiet) {
-    console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`);
+    console.log(' ═══════════════════════════════════════════════════════════════════════════');
+    console.log(' ═══════════════════════════════════════════════════════════════════════════');
+    console.log(`[TypeMapGenerator] Found ${syncServerFiles.length} Sync server files, ${syncClientFiles.length} Sync client files`, 'cyan');
   }
 
   const allSyncs = new Map<string, {
