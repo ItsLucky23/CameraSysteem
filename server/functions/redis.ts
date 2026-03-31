@@ -8,7 +8,7 @@ dotenv.config({ path: '.env.local', override: true });
 const redis = new Redis({
   host: process.env.REDIS_HOST as string,
   port: parseInt(process.env.REDIS_PORT as string),
-  ...(process.env.REDIS_USER && { username: process.env.REDIS_USER }),
+  ...(process.env.REDIS_USERNAME && { username: process.env.REDIS_USERNAME }),
   ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
   
   retryStrategy(times) {

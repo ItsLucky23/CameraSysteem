@@ -5,7 +5,7 @@ import config, { SessionLayout } from '../../config';
 import { Socket } from 'socket.io';
 import { logout } from './utils/logout';
 import { validateRequest } from '../utils/validateRequest';
-import { captureException, setSentryUser, startSpan } from '../functions/sentry';
+import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
 import tryCatch from '../../shared/tryCatch';
 import { defaultHttpStatusForResponse, extractLanguageFromHeader, normalizeErrorResponse } from '../utils/responseNormalizer';
@@ -226,13 +226,19 @@ export default async function handleApiRequest({ msg, socket, token }: handleApi
   //? Execute the API handler
   const span = startSpan(name, 'api.request') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
-    async () => await main({ data, user, functions: functionsObject })
+    async () => await main({ data, user, functions: functionsObject }),
+    undefined,
+    {
+      handler: 'handleApiRequest',
+      api: resolvedName,
+      userId: user?.id,
+      transport: 'socket',
+    },
   );
   span?.end?.();
 
   if (error) {
     console.log(`ERROR in ${name}:`, error, 'red');
-    captureException(error, { api: name, userId: user?.id });
     socket.emit(`apiResponse-${responseIndex}`, normalizeErrorResponse({
       response: {
         status: 'error',

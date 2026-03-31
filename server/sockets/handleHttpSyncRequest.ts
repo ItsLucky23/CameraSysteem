@@ -241,7 +241,18 @@ export default async function handleHttpSyncRequest({
         });
       }
 
-      const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }));
+      const [serverSyncError, serverSyncResult] = await tryCatch(
+        async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }),
+        undefined,
+        {
+          handler: 'handleHttpSyncRequest',
+          sync: resolvedName,
+          stage: 'server',
+          userId: user?.id,
+          receiver,
+          transport: 'http',
+        },
+      );
       if (serverSyncError) {
         return buildSyncError({
           response: { status: 'error', errorCode: 'sync.serverExecutionFailed' },
@@ -295,7 +306,19 @@ export default async function handleHttpSyncRequest({
       }
 
       if (syncObject[`${resolvedName}_client`]) {
-        const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }));
+        const [clientSyncError, clientSyncResult] = await tryCatch(
+          async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }),
+          undefined,
+          {
+            handler: 'handleHttpSyncRequest',
+            sync: resolvedName,
+            stage: 'client',
+            sourceUserId: user?.id,
+            targetToken: tempToken,
+            receiver,
+            transport: 'http',
+          },
+        );
         if (clientSyncError) {
           tempSocket.emit('sync', {
             cb: callbackName,

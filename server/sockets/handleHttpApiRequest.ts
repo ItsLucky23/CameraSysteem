@@ -2,7 +2,7 @@ import { apis, functions } from '../prod/generatedApis';
 import { getSession } from '../functions/session';
 import config, { SessionLayout } from '../../config';
 import { validateRequest } from '../utils/validateRequest';
-import { captureException, setSentryUser, startSpan } from '../functions/sentry';
+import { setSentryUser, startSpan } from '../functions/sentry';
 import { checkRateLimit } from '../utils/rateLimiter';
 import { inferHttpMethod, HttpMethod } from '../utils/httpApiUtils';
 import tryCatch from '../../shared/tryCatch';
@@ -272,13 +272,19 @@ export async function handleHttpApiRequest({
   // Execute the API handler
   const span = startSpan(normalizedName, 'api.request.http') as { end?: () => void } | undefined;
   const [error, result] = await tryCatch(
-    async () => await main({ data: requestData, user, functions: functionsObject })
+    async () => await main({ data: requestData, user, functions: functionsObject }),
+    undefined,
+    {
+      handler: 'handleHttpApiRequest',
+      api: resolvedName,
+      userId: user?.id,
+      transport: 'http',
+    },
   );
   span?.end?.();
 
   if (error) {
     console.log(`ERROR in HTTP API ${normalizedName}:`, error, 'red');
-    captureException(error, { api: normalizedName, userId: user?.id, source: 'http' });
     return buildNetworkError({
       response: { status: 'error', errorCode: 'api.internalServerError' },
       fallbackHttpStatus: 500,

@@ -246,7 +246,18 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     //? if the user has passed all the checks we call the preload sync function and return the result
-    const [serverSyncError, serverSyncResult] = await tryCatch(async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }));
+    const [serverSyncError, serverSyncResult] = await tryCatch(
+      async () => await serverMain({ clientInput: data, user, functions: functionsObject, roomCode: receiver }),
+      undefined,
+      {
+        handler: 'handleSyncRequest',
+        sync: resolvedName,
+        stage: 'server',
+        userId: user?.id,
+        receiver,
+        transport: 'socket',
+      },
+    );
     if (serverSyncError) {
       console.log('ERROR!!!, ', serverSyncError.message, 'red');
       return typeof responseIndex == 'number' && socket.emit(`sync-${responseIndex}`, buildSyncError({
@@ -317,7 +328,19 @@ export default async function handleSyncRequest({ msg, socket, token }: {
     }
 
     if (syncObject[`${resolvedName}_client`]) {
-      const [clientSyncError, clientSyncResult] = await tryCatch(async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }));
+      const [clientSyncError, clientSyncResult] = await tryCatch(
+        async () => await syncObject[`${resolvedName}_client`]({ clientInput: data, token: tempToken, functions: functionsObject, serverOutput, roomCode: receiver }),
+        undefined,
+        {
+          handler: 'handleSyncRequest',
+          sync: resolvedName,
+          stage: 'client',
+          sourceUserId: user?.id,
+          targetToken: tempToken,
+          receiver,
+          transport: 'socket',
+        },
+      );
       if (clientSyncError) {
         tempSocket.emit(`sync`, {
           cb,
