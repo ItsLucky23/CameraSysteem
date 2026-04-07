@@ -1,37 +1,60 @@
+const normalizeOrigin = ({ value, secure }: { value: string; secure: boolean }): string => {
+  const trimmedValue = value.trim().toLowerCase();
+  if (!trimmedValue) { return ''; }
+
+  const withProtocol = trimmedValue.startsWith('http://') || trimmedValue.startsWith('https://')
+    ? trimmedValue
+    : `http${secure ? 's' : ''}://${trimmedValue}`;
+
+  // Keep only scheme + host[:port] so paths, query params, and fragments don't affect allowlist checks.
+  const extractedOrigin = withProtocol.match(/^(https?:\/\/[^/?#]+)/)?.[1] || '';
+  if (!extractedOrigin) { return ''; }
+
+  return extractedOrigin
+    // Treat explicit :80 as equivalent to implicit default http port.
+    .replace(/^http:\/\/(.+):80$/i, 'http://$1')
+    // Treat explicit :443 as equivalent to implicit default https port.
+    .replace(/^https:\/\/(.+):443$/i, 'https://$1');
+};
+
 const allowedOrigin = (origin: string) => {
-  const location = `http${process.env.SECURE == 'true'?'s' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}/`;
-  const formattedOrigin = origin.includes('://') ? origin : `http${process.env.SECURE == 'true' ? 's' : ''}://${origin}/`;
-    
-  //? we check if the origin of the user is allowed to access the server directly
-  if (location == formattedOrigin) { return true; } 
-  if (origin == 'localhost') { return true; }
+  const secure = process.env.SECURE === 'true';
 
-  //? if the origin is not allowed we check if the origin is allowed we port 80 or port 443 cause the browser removes these sometimes
+  const externalOrigins = (process.env.EXTERNAL_ORIGINS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
 
-  const externalOrigins = process.env.EXTERNAL_ORIGINS?.split(',') || [];
-  for (const externalOrigin of externalOrigins) {
-    if (origin == externalOrigin) { return true; }
-    if (origin == externalOrigin+'/') { return true; }
+  // DNS can now contain multiple comma-separated values, same as EXTERNAL_ORIGINS.
+  const dnsOrigins = (process.env.DNS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const location = `http${secure ? 's' : ''}://${process.env.SERVER_IP}:${process.env.SERVER_PORT}`;
+  const normalizedOrigin = normalizeOrigin({ value: origin, secure });
+  const allowedOrigins = [
+    location,
+    'localhost',
+    ...externalOrigins,
+    ...dnsOrigins,
+  ];
+
+  const normalizedAllowedOrigins = new Set(
+    allowedOrigins
+      .map((value) => normalizeOrigin({ value, secure }))
+      .filter(Boolean)
+  );
+
+  if (normalizedOrigin && normalizedAllowedOrigins.has(normalizedOrigin)) {
+    return true;
   }
 
-  if (origin == process.env.DNS) { return true; }
-  if (origin == process.env.DNS+'/') { return true; }
-  if (!origin.startsWith('http://') && !origin.startsWith('https://')) {
-    // origin = 'https://' + origin;
-    if (`http${process.env.SECURE ? 's' : ''}://${origin}` == `${process.env.DNS}`) { return true; }
-    if (`http${process.env.SECURE ? 's' : ''}://${origin}` == `${process.env.DNS}/`) { return true; }
-  }
-
-  console.log('')
-  console.log('origin not allowed')
-  console.log('origin:', origin)
-  console.log('formattedOrigin:', formattedOrigin)
-  console.log('dns:', process.env.DNS)
-  console.log('dns:', process.env.DNS+'/')
-  for (const externalOrigin of externalOrigins) {
-    console.log('externalOrigin:', externalOrigin)
-    console.log('externalOrigin:', externalOrigin+'/')
-  }
+  console.log('');
+  console.log('origin not allowed');
+  console.log('origin:', origin);
+  console.log('normalizedOrigin:', normalizedOrigin);
+  console.log('allowedOrigins:', [...normalizedAllowedOrigins]);
   return false;
 }
 
