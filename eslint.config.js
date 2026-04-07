@@ -9,6 +9,7 @@ import eslintPluginImportX from 'eslint-plugin-import-x'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
 import react from 'eslint-plugin-react'
 import i18next from 'eslint-plugin-i18next';
+import eslintPluginComments from 'eslint-plugin-eslint-comments';
 
 export default tseslint.config(
   { ignores: ['dist'] },
@@ -49,9 +50,11 @@ export default tseslint.config(
       'react-refresh': reactRefresh,
       'react': react,
       'i18next': i18next, 
+      'eslint-comments': eslintPluginComments
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      'eslint-comments/no-unused-disable': 'error',
       'react-refresh/only-export-components': [
         'warn',
         { allowConstantExport: true },
