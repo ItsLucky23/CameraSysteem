@@ -74,7 +74,162 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  cameraAccessRules CameraAccess[]
+  cameraCommands    CameraCommand[]
+
   @@map("users")
+}
+
+model Camera {
+  id           String    @id @default(uuid()) @map("_id")
+  slug         String    @unique
+  name         String
+  streamKey    String    @unique
+  streamUrl    String
+  nodeId       String
+  isOnline     Boolean   @default(false)
+  mode         CAMERA_MODE @default(idle)
+  irMode       IR_MODE   @default(auto)
+  irEnabled    Boolean   @default(false)
+  pan          Int       @default(0)
+  tilt         Int       @default(0)
+  temperatureC Float?
+  lastSeenAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  accessRules  CameraAccess[]
+  commands     CameraCommand[]
+  events       CameraEvent[]
+  snapshots    CameraStateSnapshot[]
+
+  @@map("cameras")
+  @@index([nodeId])
+  @@index([isOnline, updatedAt])
+}
+
+model CameraAccess {
+  id              String   @id @default(uuid()) @map("_id")
+  cameraId        String
+  userId          String
+  canPreview      Boolean  @default(true)
+  canControl      Boolean  @default(false)
+  grantedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  camera          Camera   @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("camera_access")
+  @@unique([cameraId, userId])
+  @@index([userId])
+  @@index([cameraId])
+}
+
+model CameraCommand {
+  id             String         @id @default(uuid()) @map("_id")
+  commandId      String         @unique
+  cameraId       String
+  userId         String
+  action         CAMERA_ACTION
+  payloadJson    String
+  status         COMMAND_STATUS @default(pending)
+  rejectedReason String?
+  cooldownMs     Int?
+  createdAt      DateTime       @default(now())
+  resolvedAt     DateTime?
+
+  camera         Camera         @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("camera_commands")
+  @@index([cameraId, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+}
+
+model CameraEvent {
+  id           String            @id @default(uuid()) @map("_id")
+  cameraId     String
+  type         CAMERA_EVENT_TYPE
+  severity     EVENT_SEVERITY    @default(info)
+  messageCode  String
+  metadataJson String?
+  createdAt    DateTime          @default(now())
+
+  camera       Camera            @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  @@map("camera_events")
+  @@index([cameraId, createdAt])
+  @@index([type, createdAt])
+}
+
+model CameraStateSnapshot {
+  id             String      @id @default(uuid()) @map("_id")
+  cameraId       String
+  isOnline       Boolean
+  mode           CAMERA_MODE
+  irMode         IR_MODE
+  irEnabled      Boolean
+  pan            Int
+  tilt           Int
+  temperatureC   Float?
+  motionDetected Boolean     @default(false)
+  recording      Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+
+  camera         Camera      @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+
+  @@map("camera_state_snapshots")
+  @@index([cameraId, createdAt])
+}
+
+enum CAMERA_MODE {
+  off
+  idle
+  live
+  record
+}
+
+enum IR_MODE {
+  off
+  on
+  auto
+}
+
+enum CAMERA_ACTION {
+  panLeft
+  panRight
+  tiltUp
+  tiltDown
+  irOn
+  irOff
+  recordStart
+  recordStop
+}
+
+enum COMMAND_STATUS {
+  pending
+  accepted
+  rejected
+  executed
+  failed
+}
+
+enum CAMERA_EVENT_TYPE {
+  motion
+  thermal
+  connection
+  recording
+  command
+  access
+}
+
+enum EVENT_SEVERITY {
+  info
+  warning
+  critical
 }
 
 enum THEME {

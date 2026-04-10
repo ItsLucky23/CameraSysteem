@@ -1,0 +1,19 @@
+[Unit]
+Description=LuckyStack Pi Zero 2W Camera Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/opt/camera/pi_zero_2w
+Environment=PI_ZERO_ENV_FILE=/opt/camera/pi_zero_2w/.env
+ExecStart=/opt/camera/pi_zero_2w/.venv/bin/python /opt/camera/pi_zero_2w/run.py
+Restart=always
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

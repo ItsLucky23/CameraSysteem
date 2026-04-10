@@ -30,6 +30,23 @@ export default function middlewareHandler({
       return
     }
 
+    case '/admin/camera-access': {
+      if (!session) {
+        return { redirect: '/login' };
+      }
+
+      if (session.admin) {
+        return { success: true };
+      }
+
+      notify.error({ key: 'middleware.notAdmin' });
+      return;
+    }
+
+    case '/cameras': {
+      return session ? { success: true } : { redirect: '/login' };
+    }
+
     case '/examples': {
       return session ? { success: true } : { redirect: '/login' };
     }

@@ -7,7 +7,7 @@
 # LuckyStack Project Context
 
 > **Human-readable documentation for AI assistants and developers to understand this project.**
-> Last updated: 2026-02-10
+> Last updated: 2026-04-10
 
 ---
 
@@ -25,7 +25,7 @@ The framework is a **custom-built React + Node.js stack** inspired by Next.js bu
 | `vite.config.ts`       | Vite bundler config with path aliases (`src/`, `config`) and exclusions for server files       |
 | `index.html`           | Entry point with two root divs: `#root` (app) and `#portalRoot` (modals/overlays z-999999999)  |
 | `redis.conf`           | Redis configuration for session storage                                                        |
-| `prisma/schema.prisma` | MongoDB database schema - currently only `user` model with OAuth providers                     |
+| `prisma/schema.prisma` | MongoDB database schema - includes `User`, `Camera`, `CameraAccess`, `CameraCommand`, `CameraEvent`, and `CameraStateSnapshot` models |
 
 ## Server Architecture (`/server`)
 
@@ -144,6 +144,43 @@ When a user logs in, the system automatically kicks all previous sessions for th
 | `generateServerRequests.ts` | Scans `src/` for `_api/` and `_sync/` folders, generates route map |
 | `bundleServer.mjs`          | Bundles server for production                                      |
 | `clearServerRequests.ts`    | Clears generated route map for dev restart                         |
+
+### Camera Platform V1 (Implemented)
+
+- Added camera domain models in Prisma: `Camera`, `CameraAccess`, `CameraCommand`, `CameraEvent`, and `CameraStateSnapshot`.
+- Added camera API routes:
+  - `api/cameras/getCameraList/v1`
+  - `api/cameras/getCameraState/v1`
+  - `api/cameras/getCameraPreviewSession/v1`
+  - `api/cameras/webrtc/offer/v1`
+  - `api/cameras/executeCameraCommand/v1`
+  - `api/cameras/setIRMode/v1`
+  - `api/cameras/setRecordingMode/v1`
+  - `api/cameras/getPendingNodeCommands/v1` (Pi Zero polling endpoint)
+  - `api/cameras/ingestNodeTelemetry/v1` (Pi Zero telemetry + command-result ingest)
+- Added admin access API routes:
+  - `api/admin/camera-access/getUserCameraAccessMatrix/v1`
+  - `api/admin/camera-access/updateCameraAccess/v1`
+- Added typed sync route contracts:
+  - `sync/cameras/cameraStateUpdated/v1`
+  - `sync/cameras/cameraCommandResult/v1`
+  - `sync/admin/camera-access/cameraAccessUpdated/v1`
+  - `sync/admin/camera-access/userForcedLeaveCameraRoom/v1`
+- Added Redis-based command lock helper using keys like `lock:camera:{cameraId}:action:{action}` (with project prefix when configured).
+- Added `server/functions/cameraNode.ts` as Pi5 command bridge (Redis queue + Redis pub/sub channel for camera node commands).
+- Added `CAMERA_NODE_SHARED_SECRET` and `CAMERA_WEBRTC_SIGNALING_URL` to `.env_template` and `.env.local_template`.
+- Added Pi Zero runtime package in `pi_zero_2w/` (Python-based camera node worker):
+  - polls `api/cameras/getPendingNodeCommands/v1`
+  - executes PTZ/IR/record commands via adapter layer
+  - supports SG90 pan/tilt servo control via `PAN_SERVO_GPIO_PIN` and `TILT_SERVO_GPIO_PIN`
+  - posts telemetry and command results to `api/cameras/ingestNodeTelemetry/v1`
+  - includes `.env.example`, `requirements.txt`, and `systemd/camera-node.service.template`
+  - uses venv-first execution (`.venv/bin/python`) for both manual and systemd runs
+- Added frontend pages:
+  - `/cameras` (operator controls + live state + in-browser WebRTC preview playback)
+  - `/admin/camera-access` (access matrix management)
+  - `/admin` quick links to camera operations
+- Added middleware guards for `/cameras` (login required) and `/admin/camera-access` (admin required).
 
 ---
 
