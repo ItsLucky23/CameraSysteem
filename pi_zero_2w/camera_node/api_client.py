@@ -85,7 +85,9 @@ class Pi5ApiClient:
 
         url = f"{self._base_url}{endpoint}"
 
-        async with self._session.post(url, json={"data": data}) as response:
+        # LuckyStack HTTP APIs already treat the parsed JSON body as the API `data` payload.
+        # Sending {"data": ...} adds an extra nesting level and fails runtime type validation.
+        async with self._session.post(url, json=data) as response:
             status_code = response.status
             try:
                 body = await response.json(content_type=None)
