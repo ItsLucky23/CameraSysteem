@@ -77,6 +77,7 @@ This file tracks:
   - /cameras
   - camera list, state panel, command buttons, preview-session creation, last command result
   - in-browser WebRTC preview playback (create session + start/stop stream)
+  - /cameras monitor flow is WebRTC-first (MJPEG is kept only as temporary debug/bring-up path)
   - live sync subscriptions for state updates and command results
 - Admin access matrix page:
   - /admin/camera-access

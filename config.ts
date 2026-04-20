@@ -62,7 +62,7 @@ const config = {
   loginPageUrl: '/login',
  
   /** URL to redirect after successful login */
-  loginRedirectUrl: '/examples',
+  loginRedirectUrl: '/dashboard',
  
   /**
    * If false, logging in on a new device will automatically sign out all other sessions.

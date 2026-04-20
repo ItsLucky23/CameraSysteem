@@ -1,0 +1,126 @@
+import { AuthProps, SessionLayout } from '../../../config';
+import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
+import { tryCatch } from '../../../server/functions/tryCatch';
+
+export const rateLimit: number | false = 30;
+export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'PUT';
+
+export const auth: AuthProps = {
+  login: true,
+  additional: [{ key: 'admin', value: true }],
+};
+
+export interface ApiParams {
+  data: {
+    cameraId: string;
+    slug: string;
+    name: string;
+    nodeId: string;
+    streamUrl: string;
+  };
+  user: SessionLayout;
+  functions: Functions;
+}
+
+const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
+  const cameraId = data.cameraId.trim();
+  const slug = data.slug.trim().toLowerCase();
+  const name = data.name.trim();
+  const nodeId = data.nodeId.trim();
+  const streamUrl = data.streamUrl.trim();
+
+  if (!cameraId || !slug || !name || !nodeId || !streamUrl) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (!slugRegex.test(slug)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  const [urlParseError, parsedUrl] = await tryCatch(() => {
+    return new URL(streamUrl);
+  });
+
+  if (urlParseError || !parsedUrl || (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:')) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  const [cameraReadError, existingCamera] = await tryCatch(async () => {
+    return functions.db.prisma.camera.findUnique({
+      where: { id: cameraId },
+      select: { id: true },
+    });
+  });
+
+  if (cameraReadError) {
+    return { status: 'error', errorCode: 'camera.unexpectedError', httpStatus: 500 };
+  }
+
+  if (!existingCamera) {
+    return { status: 'error', errorCode: 'camera.notFound', httpStatus: 404 };
+  }
+
+  const [slugCheckError, slugCamera] = await tryCatch(async () => {
+    return functions.db.prisma.camera.findFirst({
+      where: {
+        slug,
+        NOT: { id: cameraId },
+      },
+      select: { id: true },
+    });
+  });
+
+  if (slugCheckError) {
+    return { status: 'error', errorCode: 'camera.unexpectedError', httpStatus: 500 };
+  }
+
+  if (slugCamera) {
+    return { status: 'error', errorCode: 'camera.slugTaken', httpStatus: 409 };
+  }
+
+  const [updateError, updatedCamera] = await tryCatch(async () => {
+    return functions.db.prisma.camera.update({
+      where: { id: cameraId },
+      data: {
+        slug,
+        name,
+        nodeId,
+        streamUrl,
+      },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        nodeId: true,
+        streamUrl: true,
+        isOnline: true,
+        mode: true,
+        lastSeenAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+
+  if (updateError || !updatedCamera) {
+    return { status: 'error', errorCode: 'camera.unexpectedError', httpStatus: 500 };
+  }
+
+  return {
+    status: 'success',
+    camera: {
+      id: updatedCamera.id,
+      slug: updatedCamera.slug,
+      name: updatedCamera.name,
+      nodeId: updatedCamera.nodeId,
+      streamUrl: updatedCamera.streamUrl,
+      isOnline: updatedCamera.isOnline,
+      mode: updatedCamera.mode,
+      lastSeenAt: updatedCamera.lastSeenAt ? updatedCamera.lastSeenAt.toISOString() : null,
+      createdAt: updatedCamera.createdAt.toISOString(),
+      updatedAt: updatedCamera.updatedAt.toISOString(),
+    },
+  };
+};

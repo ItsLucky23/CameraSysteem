@@ -18,6 +18,7 @@ import allowedOrigin from './auth/checkOrigin';
 import config, { SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
+import serveCameraMjpegStream from './utils/serveCameraMjpegStream';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
@@ -238,6 +239,25 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
       res.writeHead(302, { Location: location }); // Redirect without exposing token in URL
     }
     return res.end();
+
+  } else if (routePath === '/camera/mjpeg/stream') {
+    if (method !== 'GET') {
+      res.setHeader('Content-Type', 'application/json');
+      res.writeHead(405);
+      return res.end(JSON.stringify({
+        status: 'error',
+        httpStatus: 405,
+        message: 'api.methodNotAllowed',
+        errorCode: 'api.methodNotAllowed',
+      }));
+    }
+
+    await serveCameraMjpegStream({
+      req,
+      res,
+      params: (params && typeof params === 'object') ? (params as Record<string, unknown>) : {},
+    });
+    return;
 
     //? HTTP API route - allows calling APIs via HTTP instead of WebSocket
     //? Supports: GET/POST/PUT/DELETE /api/{name}

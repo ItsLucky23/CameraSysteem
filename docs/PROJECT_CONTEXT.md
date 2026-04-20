@@ -7,7 +7,7 @@
 # LuckyStack Project Context
 
 > **Human-readable documentation for AI assistants and developers to understand this project.**
-> Last updated: 2026-04-10
+> Last updated: 2026-04-19
 
 ---
 
@@ -161,6 +161,11 @@ When a user logs in, the system automatically kicks all previous sessions for th
 - Added admin access API routes:
   - `api/admin/camera-access/getUserCameraAccessMatrix/v1`
   - `api/admin/camera-access/updateCameraAccess/v1`
+- Added admin camera management API routes:
+  - `api/admin/getCameraCatalog/v1`
+  - `api/admin/createCamera/v1`
+  - `api/admin/updateCamera/v1`
+  - `api/admin/deleteCamera/v1`
 - Added typed sync route contracts:
   - `sync/cameras/cameraStateUpdated/v1`
   - `sync/cameras/cameraCommandResult/v1`
@@ -177,10 +182,14 @@ When a user logs in, the system automatically kicks all previous sessions for th
   - includes `.env.example`, `requirements.txt`, and `systemd/camera-node.service.template`
   - uses venv-first execution (`.venv/bin/python`) for both manual and systemd runs
 - Added frontend pages:
+  - `/dashboard` (default post-login operations landing page)
   - `/cameras` (operator controls + live state + in-browser WebRTC preview playback)
+  - `/camera/:id` (deep-link route that opens monitor page for a selected camera)
   - `/admin/camera-access` (access matrix management)
-  - `/admin` quick links to camera operations
-- Added middleware guards for `/cameras` (login required) and `/admin/camera-access` (admin required).
+  - `/admin` camera lifecycle operations (add/edit/delete/config)
+- Added `ops` template for operations UX: desktop header nav + mobile footer nav.
+- Updated `config.loginRedirectUrl` to `/dashboard` so all authenticated users land on the dashboard.
+- Added middleware guards for `/dashboard`, `/camera/:id`, and `/cameras` (login required) plus `/admin/camera-access` (admin required).
 
 ---
 

@@ -27,6 +27,8 @@ All three follow the same convention: place files in the correct folder structur
 ```
 src/{page}/page.tsx  -->  renders at /{page}
 src/page.tsx         -->  renders at /
+src/camera/[id]/page.tsx  -->  renders at /camera/:id
+src/cameras/[cameraId]/page.tsx  -->  renders at /cameras/:cameraId
 ```
 
 ### Rules
@@ -54,8 +56,9 @@ Available templates:
 | `plain`     | Minimal wrapper, no UI chrome. Sets theme to `config.defaultTheme`. |
 | `home`      | Top bar with user avatar, settings/home toggle, and logout button.  |
 | `dashboard` | Side navigation bar with main content area.                         |
+| `ops`       | Operations shell with desktop header nav and mobile footer nav.     |
 
-Both `home` and `dashboard` templates include `Middleware` for route authentication guards.
+The `home`, `dashboard`, and `ops` templates include `Middleware` for route authentication guards.
 
 ### Route Resolution Logic
 

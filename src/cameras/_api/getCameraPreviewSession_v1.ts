@@ -21,6 +21,8 @@ export interface ApiParams {
 }
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+  const previewTtlMs = 5 * 60 * 1000;
+
   const cameraId = data.cameraId.trim();
   if (!cameraId) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
@@ -57,12 +59,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'camera.accessDenied', httpStatus: 403 };
   }
 
-  if (!camera.isOnline) {
-    return { status: 'error', errorCode: 'camera.streamUnavailable', httpStatus: 503 };
-  }
-
   const previewToken = randomUUID();
-  const expiresAt = new Date(Date.now() + 60 * 1000);
+  const expiresAt = new Date(Date.now() + previewTtlMs);
 
   const [sessionStoreError] = await tryCatch(async () => {
     const key = getCameraPreviewTokenKey(previewToken);
@@ -72,7 +70,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       expiresAt: expiresAt.toISOString(),
     });
 
-    await functions.redis.redis.set(key, payload, 'PX', 60 * 1000);
+    await functions.redis.redis.set(key, payload, 'PX', previewTtlMs);
   });
 
   if (sessionStoreError) {

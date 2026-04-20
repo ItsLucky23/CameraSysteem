@@ -202,3 +202,5 @@ This section is for your exact current state: Pi Zero is flashed and reachable b
 ## Notes
 
 This handoff intentionally favors implementation clarity over brevity so no context is lost overnight.
+For a minimal first run from a fresh Pi Zero, see [PI_ZERO_VIDEO_ONLY_LOCALHOST_QUICKSTART.md](PI_ZERO_VIDEO_ONLY_LOCALHOST_QUICKSTART.md).
+For local video-first integration, Pi5 MJPEG proxy route `/camera/mjpeg/stream` can still be used as a temporary debug path. The `/cameras` operator page is WebRTC-first.

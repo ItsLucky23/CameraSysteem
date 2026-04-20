@@ -61,6 +61,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
           id: true,
           name: true,
           email: true,
+          admin: true,
         },
         orderBy: { name: 'asc' },
       }),

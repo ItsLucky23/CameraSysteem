@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import tryCatch from 'shared/tryCatch';
 
+import Icon from 'src/_components/Icon';
 import notify from 'src/_functions/notify';
 import { useTranslator } from 'src/_functions/translator';
 import { useSession } from 'src/_providers/SessionProvider';
@@ -9,7 +10,12 @@ import { apiRequest } from 'src/_sockets/apiRequest';
 import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
 import { useSyncEvents } from 'src/_sockets/syncRequest';
 
-export const template = 'home';
+export const template = 'ops';
+
+interface PageProps {
+  params?: Record<string, string | undefined>;
+  searchParams?: Record<string, string | undefined>;
+}
 
 interface CameraListItem {
   id: string;
@@ -48,7 +54,21 @@ interface PreviewSession {
 
 type CommandAction = 'panLeft' | 'panRight' | 'tiltUp' | 'tiltDown' | 'irOn' | 'irOff' | 'recordStart' | 'recordStop';
 
-export default function CamerasPage() {
+const formatRecordingDuration = (startIso: string | null): string => {
+  if (!startIso) {
+    return '00:00:00';
+  }
+
+  const elapsed = Math.max(0, Date.now() - Date.parse(startIso));
+  const totalSeconds = Math.floor(elapsed / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+};
+
+export default function CamerasPage({ params, searchParams }: PageProps) {
   const translate = useTranslator();
   const { session } = useSession();
   const { upsertSyncEventCallback } = useSyncEvents();
@@ -56,6 +76,10 @@ export default function CamerasPage() {
   const previewPeerRef = useRef<RTCPeerConnection | null>(null);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
+
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micAudioContextRef = useRef<AudioContext | null>(null);
+  const micAnimationFrameRef = useRef<number | null>(null);
 
   const [loadingList, setLoadingList] = useState<boolean>(true);
   const [loadingState, setLoadingState] = useState<boolean>(false);
@@ -75,6 +99,15 @@ export default function CamerasPage() {
     result: 'accepted' | 'rejected' | 'executed' | 'failed';
     reasonCode?: string;
   } | null>(null);
+
+  const [zoomLevel, setZoomLevel] = useState<number>(42);
+  const [outputAudioEnabled, setOutputAudioEnabled] = useState<boolean>(true);
+  const [uplinkMicEnabled, setUplinkMicEnabled] = useState<boolean>(false);
+  const [micLevel, setMicLevel] = useState<number>(0);
+  const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
+  const [recordingDurationLabel, setRecordingDurationLabel] = useState<string>('00:00:00');
+
+  const forcedCameraId = params?.id ?? params?.cameraId ?? params?.cameraid ?? searchParams?.cameraId ?? searchParams?.id ?? null;
 
   const clearPreviewVideoElement = useCallback(() => {
     if (!previewVideoRef.current) {
@@ -159,6 +192,10 @@ export default function CamerasPage() {
     if (response.status === 'success') {
       setCameras(response.cameras);
       setSelectedCameraId((previous) => {
+        if (forcedCameraId && response.cameras.some((camera) => camera.id === forcedCameraId)) {
+          return forcedCameraId;
+        }
+
         if (previous && response.cameras.some((camera) => camera.id === previous)) {
           return previous;
         }
@@ -171,7 +208,7 @@ export default function CamerasPage() {
 
     setLoadingList(false);
     notify.error({ key: response.errorCode });
-  }, []);
+  }, [forcedCameraId]);
 
   const loadCameraState = useCallback(async (cameraId: string) => {
     setLoadingState(true);
@@ -195,6 +232,14 @@ export default function CamerasPage() {
   useEffect(() => {
     void loadCameras();
   }, [loadCameras]);
+
+  useEffect(() => {
+    if (!forcedCameraId) {
+      return;
+    }
+
+    setSelectedCameraId(forcedCameraId);
+  }, [forcedCameraId]);
 
   useEffect(() => {
     if (!selectedCameraId) {
@@ -471,6 +516,7 @@ export default function CamerasPage() {
       previewStreamRef.current = firstStream;
       if (previewVideoRef.current) {
         previewVideoRef.current.srcObject = firstStream;
+        previewVideoRef.current.muted = !outputAudioEnabled;
       }
 
       setPreviewActive(true);
@@ -573,226 +619,843 @@ export default function CamerasPage() {
     setPreviewStarting(false);
     setPreviewActive(true);
     setPreviewStatusKey('cameras.previewConnected');
-  }, [previewSession, selectedCameraId, stopPreview, waitForIceGathering]);
+  }, [outputAudioEnabled, previewSession, selectedCameraId, stopPreview, waitForIceGathering]);
 
-  const cameraStatusText = cameraState?.isOnline
-    ? translate({ key: 'cameras.statusOnline' })
-    : translate({ key: 'cameras.statusOffline' });
+  useEffect(() => {
+    if (!cameraState?.recording) {
+      setRecordingStartedAt(null);
+      setRecordingDurationLabel('00:00:00');
+      return;
+    }
+
+    if (!recordingStartedAt) {
+      setRecordingStartedAt(cameraState.updatedAt);
+      setRecordingDurationLabel(formatRecordingDuration(cameraState.updatedAt));
+    }
+
+    const interval = globalThis.setInterval(() => {
+      setRecordingDurationLabel(formatRecordingDuration(recordingStartedAt ?? cameraState.updatedAt));
+    }, 1000);
+
+    return () => {
+      globalThis.clearInterval(interval);
+    };
+  }, [cameraState?.recording, cameraState?.updatedAt, recordingStartedAt]);
+
+  useEffect(() => {
+    const stopMicCapture = () => {
+      if (micAnimationFrameRef.current !== null) {
+        globalThis.cancelAnimationFrame(micAnimationFrameRef.current);
+        micAnimationFrameRef.current = null;
+      }
+
+      if (micStreamRef.current) {
+        for (const track of micStreamRef.current.getTracks()) {
+          track.stop();
+        }
+        micStreamRef.current = null;
+      }
+
+      if (micAudioContextRef.current) {
+        void micAudioContextRef.current.close();
+        micAudioContextRef.current = null;
+      }
+
+      setMicLevel(0);
+    };
+
+    if (!uplinkMicEnabled) {
+      stopMicCapture();
+      return;
+    }
+
+    let cancelled = false;
+
+    const startMicCapture = async () => {
+      const [streamError, stream] = await tryCatch(async () => {
+        return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      });
+
+      if (streamError || !stream) {
+        setUplinkMicEnabled(false);
+        notify.error({ key: 'camera.unexpectedError' });
+        return;
+      }
+
+      if (cancelled) {
+        for (const track of stream.getTracks()) {
+          track.stop();
+        }
+        return;
+      }
+
+      micStreamRef.current = stream;
+      const audioContext = new AudioContext();
+      micAudioContextRef.current = audioContext;
+
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.fftSize);
+
+      const tick = () => {
+        analyser.getByteTimeDomainData(dataArray);
+
+        let sum = 0;
+        for (let index = 0; index < dataArray.length; index += 1) {
+          const normalized = (dataArray[index] - 128) / 128;
+          sum += normalized * normalized;
+        }
+
+        const rms = Math.sqrt(sum / dataArray.length);
+        const nextLevel = Math.min(100, Math.round(rms * 240));
+        setMicLevel(nextLevel);
+
+        micAnimationFrameRef.current = globalThis.requestAnimationFrame(tick);
+      };
+
+      tick();
+    };
+
+    void startMicCapture();
+
+    return () => {
+      cancelled = true;
+      stopMicCapture();
+    };
+  }, [uplinkMicEnabled]);
+
+  useEffect(() => {
+    if (!previewVideoRef.current) {
+      return;
+    }
+
+    previewVideoRef.current.muted = !outputAudioEnabled;
+  }, [outputAudioEnabled, previewActive]);
 
   const controlsDisabled = busyAction !== null || !selectedCamera?.canControl;
-  const startPreviewDisabled = previewStarting || !previewSession;
-  const stopPreviewDisabled = !previewActive && !previewStarting;
+  const startPreviewDisabled = previewStarting || !previewSession || !selectedCamera?.canPreview;
 
-  return (
-    <div className={`w-full h-full bg-background overflow-y-auto`}>
-      <div className={`w-full max-w-7xl self-center p-4 md:p-6 flex flex-col gap-4`}>
-        <div className={`w-full bg-container1 border border-container1-border rounded-xl p-4 flex flex-wrap items-center justify-between gap-2`}>
-          <div className={`flex flex-col`}>
-            <div className={`text-xl font-semibold text-title`}>{translate({ key: 'cameras.title' })}</div>
-            <div className={`text-sm text-common`}>{translate({ key: 'cameras.subtitle' })}</div>
+  const qualityLabel = useMemo(() => {
+    if (!selectedCamera) {
+      return '4K';
+    }
+
+    if (!previewActive) {
+      return 'STBY';
+    }
+
+    if (cameraState?.mode === 'record') {
+      return '4K';
+    }
+
+    if (cameraState?.mode === 'live') {
+      return '1080P';
+    }
+
+    return '4K';
+  }, [cameraState?.mode, previewActive, selectedCamera]);
+
+  const fpsLabel = previewActive ? '60FPS' : '0FPS';
+  const zoomLabel = `${(1 + (zoomLevel / 30)).toFixed(1)}X`;
+  const recordingActive = Boolean(cameraState?.recording);
+  const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';
+
+  const previewActionLabel = useMemo(() => {
+    if (!previewSession) {
+      return translate({ key: 'cameras.requestPreviewSession' });
+    }
+
+    if (!previewActive) {
+      return translate({ key: 'cameras.startPreview' });
+    }
+
+    return translate({ key: 'cameras.stopPreview' });
+  }, [previewActive, previewSession, translate]);
+
+  const temperatureLabel = useMemo(() => {
+    if (cameraState?.temperatureC === null || cameraState?.temperatureC === undefined) {
+      return translate({ key: 'cameras.notAvailable' });
+    }
+
+    return `${String(cameraState.temperatureC.toFixed(1))} C`;
+  }, [cameraState?.temperatureC, translate]);
+
+  const handlePreviewAction = useCallback(() => {
+    if (!previewSession) {
+      void createPreviewSession();
+      return;
+    }
+
+    if (!previewActive) {
+      void startPreview();
+      return;
+    }
+
+    stopPreview();
+  }, [createPreviewSession, previewActive, previewSession, startPreview, stopPreview]);
+
+  const renderPtzPad = useCallback((sizeClassName: string) => {
+    return (
+      <div className={`relative ${sizeClassName} rounded-full border border-container2-border bg-container2 p-6`}>
+        <button
+          className={`absolute left-1/2 top-4 h-11 w-11 -translate-x-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
+          disabled={controlsDisabled}
+          onClick={() => {
+            void sendCommand('tiltUp');
+          }}
+          type="button"
+        >
+          <div className={`flex h-full w-full items-center justify-center`}>
+            <Icon name="keyboard_arrow_up" size="24px" customClasses="text-common" />
           </div>
-          <button
-            className={`h-9 px-4 rounded-md bg-container2 border border-container2-border text-title`}
-            onClick={() => {
-              void loadCameras();
-            }}
-          >
-            {translate({ key: 'cameras.refresh' })}
-          </button>
+        </button>
+
+        <button
+          className={`absolute bottom-4 left-1/2 h-11 w-11 -translate-x-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
+          disabled={controlsDisabled}
+          onClick={() => {
+            void sendCommand('tiltDown');
+          }}
+          type="button"
+        >
+          <div className={`flex h-full w-full items-center justify-center`}>
+            <Icon name="keyboard_arrow_down" size="24px" customClasses="text-common" />
+          </div>
+        </button>
+
+        <button
+          className={`absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
+          disabled={controlsDisabled}
+          onClick={() => {
+            void sendCommand('panLeft');
+          }}
+          type="button"
+        >
+          <div className={`flex h-full w-full items-center justify-center`}>
+            <Icon name="keyboard_arrow_left" size="24px" customClasses="text-common" />
+          </div>
+        </button>
+
+        <button
+          className={`absolute right-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
+          disabled={controlsDisabled}
+          onClick={() => {
+            void sendCommand('panRight');
+          }}
+          type="button"
+        >
+          <div className={`flex h-full w-full items-center justify-center`}>
+            <Icon name="keyboard_arrow_right" size="24px" customClasses="text-common" />
+          </div>
+        </button>
+
+        <button
+          className={`absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-primary/30 bg-primary/10`}
+          onClick={() => {
+            if (selectedCamera) {
+              void loadCameraState(selectedCamera.id);
+            }
+          }}
+          type="button"
+        >
+          <Icon name="home" size="22px" customClasses="text-primary" />
+        </button>
+      </div>
+    );
+  }, [controlsDisabled, loadCameraState, selectedCamera, sendCommand]);
+
+  const renderPreviewPanel = useCallback((desktop: boolean) => {
+    return (
+      <div className={`relative w-full overflow-hidden rounded-2xl border border-container2-border bg-container2 ${desktop ? 'h-full min-h-[30rem]' : 'aspect-video'}`}>
+        {!previewActive && (
+          <div className={`absolute inset-0 z-20 flex items-center justify-center bg-container2/80 px-4 text-center text-sm font-semibold text-common`}>
+            {translate({ key: 'cameras.previewNoSignal' })}
+          </div>
+        )}
+
+        <video
+          autoPlay
+          className={`h-full w-full object-cover ${previewActive ? 'block' : 'hidden'}`}
+          controls
+          muted={!outputAudioEnabled}
+          playsInline
+          ref={previewVideoRef}
+        />
+
+        <div className={`pointer-events-none absolute inset-0 bg-gradient-to-t from-title/70 via-transparent to-title/50`} />
+
+        <div className={`absolute left-3 right-3 top-3 z-30 flex items-start justify-between gap-2`}>
+          <div className={`min-w-0 flex-1`}>
+            <div className={`inline-flex max-w-full items-center gap-2 rounded-full border border-title-primary/20 bg-title/65 px-3 py-1 text-xs font-bold uppercase tracking-wide text-title-primary`}>
+              <span className={`h-2 w-2 shrink-0 rounded-full ${recordingActive ? 'bg-wrong animate-pulse' : 'bg-correct'}`} />
+              <span className={`truncate`}>{selectedCamera?.name}</span>
+            </div>
+
+            <div className={`mt-2 inline-flex items-center gap-2 rounded-md border border-title-primary/20 bg-title/65 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-title-primary`}>
+              <span>{qualityLabel}</span>
+              <span>/</span>
+              <span>{fpsLabel}</span>
+            </div>
+          </div>
+
+          <div className={`flex flex-col items-end gap-2`}>
+            <div className={`rounded-full border border-title-primary/20 bg-title/65 px-3 py-1 text-xs font-bold text-title-primary`}>
+              {translate({ key: 'cameras.temperature' })}: {temperatureLabel}
+            </div>
+            <div className={`rounded-full border px-3 py-1 text-xs font-bold ${recordingActive ? 'border-wrong/40 bg-wrong/15 text-title-primary' : 'border-container2-border bg-container2/80 text-common'}`}>
+              {recordingActive
+                ? `${translate({ key: 'cameras.recording' })} ${recordingDurationLabel}`
+                : translate({ key: 'dashboard.recordingPaused' })}
+            </div>
+          </div>
         </div>
 
-        <div className={`w-full grid grid-cols-1 lg:grid-cols-[280px,1fr] gap-4`}>
-          <div className={`bg-container1 border border-container1-border rounded-xl p-3 flex flex-col gap-2 max-h-[70vh] overflow-y-auto`}>
-            {loadingList && (
-              <div className={`text-sm text-common`}>{translate({ key: 'cameras.loading' })}</div>
-            )}
-            {!loadingList && cameras.length === 0 && (
-              <div className={`text-sm text-common`}>{translate({ key: 'cameras.empty' })}</div>
-            )}
+        <div className={`absolute bottom-3 left-3 right-3 z-30 flex items-center justify-between gap-2`}>
+          <div className={`rounded-full border border-title-primary/20 bg-title/65 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-title-primary`}>
+            {translate({ key: 'cameraDesign.previewStatus' })}: {translate({ key: previewStatusKey })}
+          </div>
+
+          <button
+            className={`rounded-full border border-primary-border bg-primary px-3 py-1 text-xs font-bold text-title-primary disabled:opacity-60`}
+            disabled={!selectedCamera?.canPreview || previewStarting}
+            onClick={handlePreviewAction}
+            type="button"
+          >
+            {previewActionLabel}
+          </button>
+        </div>
+      </div>
+    );
+  }, [fpsLabel, handlePreviewAction, outputAudioEnabled, previewActionLabel, previewActive, previewStarting, previewStatusKey, qualityLabel, recordingActive, recordingDurationLabel, selectedCamera?.canPreview, selectedCamera?.name, temperatureLabel, translate]);
+
+  if (!selectedCamera && !loadingList) {
+    return (
+      <div className={`flex h-full w-full items-center justify-center bg-background p-4`}>
+        <div className={`rounded-xl border border-container1-border bg-container1 p-4 text-common`}>
+          {translate({ key: 'cameras.selectPrompt' })}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`h-full w-full overflow-y-auto bg-background`}>
+      <div className={`mx-auto flex w-full max-w-[96rem] flex-col gap-5 px-4 py-4 md:px-6 md:py-6 [container-type:inline-size]`}>
+        <div className={`rounded-2xl border border-container2-border bg-container1 p-4 md:p-5`}> 
+          <div className={`flex flex-wrap items-center justify-between gap-3`}>
+            <div className={`flex min-w-0 items-center gap-2`}>
+              <Icon name="videocam" size="22px" customClasses="text-primary" />
+              <div className={`truncate text-2xl font-black tracking-tight text-title`}>{translate({ key: 'cameraDesign.monitorTitle' })}</div>
+            </div>
+
+            <div className={`flex items-center gap-2`}>
+              <button
+                className={`rounded-lg border border-container2-border bg-container2 px-3 py-2 text-xs font-bold text-title`}
+                onClick={() => {
+                  void loadCameras();
+                }}
+                type="button"
+              >
+                {translate({ key: 'cameras.refresh' })}
+              </button>
+
+              <button
+                className={`rounded-lg border border-container2-border bg-container2 px-3 py-2 text-xs font-bold text-title disabled:opacity-60`}
+                disabled={loadingState || !selectedCamera}
+                onClick={() => {
+                  if (selectedCamera) {
+                    void loadCameraState(selectedCamera.id);
+                  }
+                }}
+                type="button"
+              >
+                {translate({ key: 'cameras.refreshState' })}
+              </button>
+            </div>
+          </div>
+
+          <div className={`mt-3 flex gap-2 overflow-x-auto pb-1`}>
             {cameras.map((camera) => {
-              const isSelected = selectedCameraId === camera.id;
+              const selected = camera.id === selectedCameraId;
+              const offline = !camera.isOnline || camera.mode === 'off';
 
               return (
                 <button
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-bold transition-colors ${selected ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'} ${offline ? 'opacity-80' : ''}`}
                   key={camera.id}
-                  className={`w-full rounded-lg border p-3 flex flex-col items-start gap-1 text-left ${isSelected ? 'bg-container3 border-container3-border text-title' : 'bg-container2 border-container2-border text-title'}`}
                   onClick={() => {
-                    stopPreview();
                     setSelectedCameraId(camera.id);
-                    setPreviewSession(null);
-                    setPreviewErrorKey(null);
-                    setPreviewStatusKey('cameras.previewIdle');
                   }}
+                  type="button"
                 >
-                  <div className={`text-sm font-semibold line-clamp-1`}>{camera.name}</div>
-                  <div className={`text-xs ${isSelected ? 'text-title' : 'text-common'}`}>{camera.slug}</div>
-                  <div className={`text-xs ${isSelected ? 'text-title' : 'text-common'}`}>
-                    {camera.isOnline
-                      ? translate({ key: 'cameras.statusOnline' })
-                      : translate({ key: 'cameras.statusOffline' })}
+                  <div className={`flex items-center gap-2`}>
+                    <span className={`h-2 w-2 rounded-full ${offline ? 'bg-wrong' : 'bg-correct'}`} />
+                    <span>{camera.name}</span>
                   </div>
                 </button>
               );
             })}
           </div>
 
-          <div className={`bg-container1 border border-container1-border rounded-xl p-4 flex flex-col gap-4`}>
-            {!selectedCamera && (
-              <div className={`text-sm text-common`}>{translate({ key: 'cameras.selectPrompt' })}</div>
-            )}
+          {!selectedCamera?.canControl && !loadingList && (
+            <div className={`mt-3 rounded-lg border border-wrong/30 bg-wrong/10 px-3 py-2 text-xs font-medium text-wrong`}>
+              {translate({ key: 'cameras.controlDisabledHint' })}
+            </div>
+          )}
 
-            {selectedCamera && (
-              <>
-                <div className={`flex flex-wrap items-center justify-between gap-2`}>
-                  <div className={`flex flex-col`}>
-                    <div className={`text-lg font-semibold text-title`}>{selectedCamera.name}</div>
-                    <div className={`text-xs text-common`}>{selectedCamera.id}</div>
-                  </div>
+          {loadingState && (
+            <div className={`mt-3 animate-pulse rounded-lg border border-container2-border bg-container2 px-3 py-2 text-xs text-common`}>
+              {translate({ key: 'cameras.loadingState' })}
+            </div>
+          )}
+        </div>
+
+        {loadingList && (
+          <div className={`animate-pulse rounded-xl border border-container2-border bg-container1 p-4 text-sm text-common`}>
+            {translate({ key: 'cameras.loading' })}
+          </div>
+        )}
+
+        {!loadingList && !selectedCamera && (
+          <div className={`rounded-xl border border-container2-border bg-container1 p-4 text-sm text-common`}>
+            {translate({ key: 'cameras.empty' })}
+          </div>
+        )}
+
+        {!loadingList && selectedCamera && (
+          <>
+            <div className={`md:hidden`}>
+              <div className={`flex flex-col gap-4`}>
+                {renderPreviewPanel(false)}
+
+                <div className={`grid grid-cols-1 gap-2 sm:grid-cols-3`}>
                   <button
-                    className={`h-9 px-4 rounded-md bg-container2 border border-container2-border text-title`}
+                    className={`rounded-xl border border-container2-border bg-container2 px-4 py-2 text-xs font-bold text-title disabled:opacity-60`}
+                    disabled={!selectedCamera.canPreview}
                     onClick={() => {
-                      void loadCameraState(selectedCamera.id);
+                      void createPreviewSession();
                     }}
+                    type="button"
                   >
-                    {translate({ key: 'cameras.refreshState' })}
+                    {translate({ key: 'cameras.requestPreviewSession' })}
+                  </button>
+
+                  <button
+                    className={`rounded-xl border border-primary-border bg-primary px-4 py-2 text-xs font-bold text-title-primary disabled:opacity-60`}
+                    disabled={startPreviewDisabled}
+                    onClick={() => {
+                      void startPreview();
+                    }}
+                    type="button"
+                  >
+                    {translate({ key: 'cameras.startPreview' })}
+                  </button>
+
+                  <button
+                    className={`rounded-xl border px-4 py-2 text-xs font-bold ${recordingActive ? 'border-wrong/35 bg-wrong/15 text-wrong' : 'border-container2-border bg-container2 text-title'} disabled:opacity-60`}
+                    disabled={controlsDisabled}
+                    onClick={() => {
+                      void setRecording(!recordingActive);
+                    }}
+                    type="button"
+                  >
+                    {recordingActive
+                      ? translate({ key: 'cameras.recordStop' })
+                      : translate({ key: 'cameras.recordStart' })}
                   </button>
                 </div>
 
-                {loadingState && (
-                  <div className={`text-sm text-common`}>{translate({ key: 'cameras.loadingState' })}</div>
-                )}
-
-                {cameraState && (
-                  <div className={`grid grid-cols-2 md:grid-cols-4 gap-2`}>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.status' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>{cameraStatusText}</div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.mode' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>{cameraState.mode}</div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.irMode' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>{cameraState.irMode}</div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.temperature' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>
-                        {cameraState.temperatureC === null
-                          ? translate({ key: 'cameras.notAvailable' })
-                          : `${String(cameraState.temperatureC)} C`}
-                      </div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.pan' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>{String(cameraState.pan)}</div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.tilt' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>{String(cameraState.tilt)}</div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.motion' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>
-                        {cameraState.motionDetected
-                          ? translate({ key: 'cameras.yes' })
-                          : translate({ key: 'cameras.no' })}
-                      </div>
-                    </div>
-                    <div className={`bg-container2 border border-container2-border rounded-lg p-2 flex flex-col`}>
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.recording' })}</div>
-                      <div className={`text-sm font-semibold text-title`}>
-                        {cameraState.recording
-                          ? translate({ key: 'cameras.yes' })
-                          : translate({ key: 'cameras.no' })}
-                      </div>
-                    </div>
+                {previewErrorKey && (
+                  <div className={`rounded-lg border border-wrong/30 bg-wrong/10 px-3 py-2 text-xs font-semibold text-wrong`}>
+                    {translate({ key: previewErrorKey })}
                   </div>
                 )}
 
-                <div className={`bg-container2 border border-container2-border rounded-xl p-3 flex flex-col gap-2`}>
-                  <div className={`text-sm font-semibold text-title`}>{translate({ key: 'cameras.controls' })}</div>
-                  {!selectedCamera.canControl && (
-                    <div className={`text-xs text-common`}>{translate({ key: 'cameras.controlDisabledHint' })}</div>
-                  )}
-                  <div className={`grid grid-cols-2 md:grid-cols-4 gap-2`}>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void sendCommand('panLeft'); }} disabled={controlsDisabled}>{translate({ key: 'cameras.panLeft' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void sendCommand('panRight'); }} disabled={controlsDisabled}>{translate({ key: 'cameras.panRight' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void sendCommand('tiltUp'); }} disabled={controlsDisabled}>{translate({ key: 'cameras.tiltUp' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void sendCommand('tiltDown'); }} disabled={controlsDisabled}>{translate({ key: 'cameras.tiltDown' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void setIRMode('on'); }} disabled={controlsDisabled}>{translate({ key: 'cameras.irOn' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void setIRMode('off'); }} disabled={controlsDisabled}>{translate({ key: 'cameras.irOff' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void setRecording(true); }} disabled={controlsDisabled}>{translate({ key: 'cameras.recordStart' })}</button>
-                    <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void setRecording(false); }} disabled={controlsDisabled}>{translate({ key: 'cameras.recordStop' })}</button>
+                <div className={`rounded-2xl border border-container2-border bg-container1 p-4`}> 
+                  <div className={`mb-3 text-xs font-bold uppercase tracking-widest text-common/70`}>
+                    {translate({ key: 'cameraDesign.precisionPtz' })}
+                  </div>
+                  <div className={`flex justify-center`}>{renderPtzPad('h-56 w-56')}</div>
+
+                  <div className={`mt-4 flex items-center justify-between gap-2`}>
+                    <div className={`text-xs font-bold uppercase tracking-widest text-common/70`}>
+                      {translate({ key: 'cameraDesign.opticalZoom' })}
+                    </div>
+                    <div className={`text-sm font-bold text-primary`}>{zoomLabel}</div>
+                  </div>
+
+                  <div className={`mt-3 flex items-center gap-2 rounded-xl border border-container2-border bg-container2 p-3`}>
+                    <Icon name="zoom_out" size="18px" customClasses="text-common" />
+                    <input
+                      className={`w-full accent-primary`}
+                      max={100}
+                      min={1}
+                      onChange={(event) => {
+                        setZoomLevel(Number(event.target.value));
+                      }}
+                      type="range"
+                      value={zoomLevel}
+                    />
+                    <Icon name="zoom_in" size="18px" customClasses="text-common" />
                   </div>
                 </div>
 
-                <div className={`bg-container2 border border-container2-border rounded-xl p-3 flex flex-col gap-2`}>
-                  <div className={`flex flex-wrap items-center justify-between gap-2`}>
-                    <div className={`text-sm font-semibold text-title`}>{translate({ key: 'cameras.previewTitle' })}</div>
-                    <div className={`flex flex-wrap gap-2`}>
-                      <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} onClick={() => { void createPreviewSession(); }}>
-                        {translate({ key: 'cameras.requestPreviewSession' })}
-                      </button>
-                      <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} disabled={startPreviewDisabled} onClick={() => { void startPreview(); }}>
-                        {translate({ key: 'cameras.startPreview' })}
-                      </button>
-                      <button className={`h-9 px-3 rounded-md bg-container1 border border-container1-border text-title`} disabled={stopPreviewDisabled} onClick={stopPreview}>
-                        {translate({ key: 'cameras.stopPreview' })}
-                      </button>
+                <div className={`rounded-2xl border border-container2-border bg-container1 p-4`}> 
+                  <div className={`mb-3 text-xs font-bold uppercase tracking-widest text-common/70`}>
+                    {translate({ key: 'cameraDesign.infraredMode' })}
+                  </div>
+                  <div className={`grid grid-cols-3 gap-2`}>
+                    {[
+                      { mode: 'off' as const, key: 'cameras.irOff' },
+                      { mode: 'on' as const, key: 'cameras.irOn' },
+                      { mode: 'auto' as const, key: 'cameras.auto' },
+                    ].map((item) => {
+                      const active = currentIRMode === item.mode;
+
+                      return (
+                        <button
+                          className={`rounded-lg border px-2 py-2 text-xs font-bold ${active ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'} disabled:opacity-60`}
+                          disabled={controlsDisabled}
+                          key={item.mode}
+                          onClick={() => {
+                            void setIRMode(item.mode);
+                          }}
+                          type="button"
+                        >
+                          {translate({ key: item.key })}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2`}>
+                  <div className={`rounded-2xl border border-container2-border bg-container1 p-4`}>
+                    <div className={`mb-3 text-xs font-bold uppercase tracking-widest text-common/70`}>
+                      {translate({ key: 'cameraDesign.systemAudio' })}
                     </div>
+                    <button
+                      className={`w-full rounded-xl border px-3 py-3 text-xs font-bold ${outputAudioEnabled ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'}`}
+                      onClick={() => {
+                        setOutputAudioEnabled((previous) => !previous);
+                      }}
+                      type="button"
+                    >
+                      <div className={`flex items-center justify-center gap-2`}>
+                        <Icon name={outputAudioEnabled ? 'volume_up' : 'volume_off'} size="18px" customClasses={outputAudioEnabled ? 'text-title-primary' : 'text-common'} />
+                        <span>
+                          {outputAudioEnabled
+                            ? translate({ key: 'cameraDesign.audioActive' })
+                            : translate({ key: 'cameraDesign.audioMuted' })}
+                        </span>
+                      </div>
+                    </button>
                   </div>
 
-                  <div className={`text-xs text-common`}>
-                    {translate({ key: 'cameras.previewStatus' })}: {translate({ key: previewStatusKey })}
+                  <div className={`rounded-2xl border border-container2-border bg-container1 p-4`}>
+                    <div className={`mb-3 flex items-center justify-between gap-2`}>
+                      <div className={`text-xs font-bold uppercase tracking-widest text-common/70`}>
+                        {translate({ key: 'cameraDesign.commUplink' })}
+                      </div>
+                      <div className={`text-[10px] font-bold uppercase tracking-wide text-primary`}>
+                        {translate({ key: 'cameraDesign.stationActive' })}
+                      </div>
+                    </div>
+
+                    <div className={`flex items-center gap-3`}>
+                      <button
+                        className={`h-12 w-12 shrink-0 rounded-full border ${uplinkMicEnabled ? 'border-primary-border bg-primary/10' : 'border-container2-border bg-container2'}`}
+                        onClick={() => {
+                          setUplinkMicEnabled((previous) => !previous);
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name={uplinkMicEnabled ? 'mic' : 'mic_off'} size="22px" customClasses={uplinkMicEnabled ? 'text-primary' : 'text-common'} />
+                        </div>
+                      </button>
+
+                      <div className={`flex-1`}>
+                        <div className={`mb-2 flex h-8 items-end gap-1 rounded-md border border-container2-border bg-container2 px-2`}>
+                          {Array.from({ length: 12 }).map((_, index) => {
+                            const threshold = ((index + 1) / 12) * 100;
+                            const active = micLevel >= threshold;
+
+                            return (
+                              <div
+                                className={`w-1 rounded-sm ${active ? 'bg-primary' : 'bg-container1-border'}`}
+                                key={`mobile-mic-bar-${String(index)}`}
+                                style={{ height: `${String(((index % 5) + 2) * 14)}%` }}
+                              />
+                            );
+                          })}
+                        </div>
+
+                        <div className={`h-2 w-full overflow-hidden rounded-full border border-container2-border bg-container2`}>
+                          <div className={`h-full bg-primary transition-all duration-100`} style={{ width: `${String(micLevel)}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {lastCommandResult && (
+                  <div className={`rounded-xl border border-container2-border bg-container1 p-3 text-xs text-common`}>
+                    <div className={`font-semibold text-title`}>{translate({ key: 'cameras.lastCommand' })}</div>
+                    <div>{translate({ key: 'cameras.action' })}: {lastCommandResult.action}</div>
+                    <div>{translate({ key: 'cameras.result' })}: {lastCommandResult.result}</div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className={`hidden md:block`}>
+              <div className={`grid grid-cols-[minmax(0,4fr)_minmax(18rem,1fr)] gap-4 items-start`}>
+                <div className={`rounded-3xl border border-container2-border bg-container1 p-4 flex flex-col gap-3 min-h-[34rem]`}>
+                  {renderPreviewPanel(true)}
+
+                  <div className={`grid grid-cols-3 gap-2`}>
+                    <button
+                      className={`rounded-xl border border-container2-border bg-container2 px-4 py-2 text-xs font-bold text-title disabled:opacity-60`}
+                      disabled={!selectedCamera.canPreview}
+                      onClick={() => {
+                        void createPreviewSession();
+                      }}
+                      type="button"
+                    >
+                      {translate({ key: 'cameras.requestPreviewSession' })}
+                    </button>
+
+                    <button
+                      className={`rounded-xl border border-primary-border bg-primary px-4 py-2 text-xs font-bold text-title-primary disabled:opacity-60`}
+                      disabled={startPreviewDisabled}
+                      onClick={() => {
+                        void startPreview();
+                      }}
+                      type="button"
+                    >
+                      {translate({ key: 'cameras.startPreview' })}
+                    </button>
+
+                    <button
+                      className={`rounded-xl border border-container2-border bg-container2 px-4 py-2 text-xs font-bold text-title disabled:opacity-60`}
+                      disabled={!previewActive && !previewStarting}
+                      onClick={stopPreview}
+                      type="button"
+                    >
+                      {translate({ key: 'cameras.stopPreview' })}
+                    </button>
                   </div>
 
                   {previewErrorKey && (
-                    <div className={`text-xs text-wrong`}>{translate({ key: previewErrorKey })}</div>
-                  )}
-
-                  <div className={`w-full aspect-video rounded-lg bg-container1 border border-container1-border overflow-hidden flex items-center justify-center`}>
-                    {!previewActive && (
-                      <div className={`text-xs text-common`}>{translate({ key: 'cameras.previewNoSignal' })}</div>
-                    )}
-                    { }
-                    <video ref={previewVideoRef} autoPlay playsInline muted controls className={`w-full h-full object-cover ${previewActive ? 'block' : 'hidden'}`} />
-                  </div>
-
-                  {!previewSession && (
-                    <div className={`text-xs text-common`}>{translate({ key: 'cameras.previewHint' })}</div>
-                  )}
-
-                  {previewSession && (
-                    <div className={`grid grid-cols-1 md:grid-cols-2 gap-2`}>
-                      <div className={`bg-container1 border border-container1-border rounded-lg p-2 text-xs text-title`}>{translate({ key: 'cameras.transport' })}: {previewSession.transport}</div>
-                      <div className={`bg-container1 border border-container1-border rounded-lg p-2 text-xs text-title`}>{translate({ key: 'cameras.streamKey' })}: {previewSession.streamKey}</div>
-                      <div className={`bg-container1 border border-container1-border rounded-lg p-2 text-xs text-title`}>{translate({ key: 'cameras.offerUrl' })}: {previewSession.offerUrl}</div>
-                      <div className={`bg-container1 border border-container1-border rounded-lg p-2 text-xs text-title`}>{translate({ key: 'cameras.expiresAt' })}: {previewSession.expiresAt}</div>
-                      <div className={`bg-container1 border border-container1-border rounded-lg p-2 text-xs text-title md:col-span-2`}>{translate({ key: 'cameras.previewToken' })}: {previewSession.token}</div>
+                    <div className={`rounded-lg border border-wrong/30 bg-wrong/10 px-3 py-2 text-xs font-semibold text-wrong`}>
+                      {translate({ key: previewErrorKey })}
                     </div>
                   )}
                 </div>
 
-                <div className={`bg-container2 border border-container2-border rounded-xl p-3 flex flex-col gap-1`}>
-                  <div className={`text-sm font-semibold text-title`}>{translate({ key: 'cameras.lastCommand' })}</div>
-                  {!lastCommandResult && (
-                    <div className={`text-xs text-common`}>{translate({ key: 'cameras.noCommandYet' })}</div>
-                  )}
-                  {lastCommandResult && (
-                    <>
-                      <div className={`text-xs text-title`}>{translate({ key: 'cameras.commandId' })}: {lastCommandResult.commandId}</div>
-                      <div className={`text-xs text-title`}>{translate({ key: 'cameras.action' })}: {lastCommandResult.action}</div>
-                      <div className={`text-xs text-title`}>{translate({ key: 'cameras.result' })}: {lastCommandResult.result}</div>
-                      <div className={`text-xs text-title`}>{translate({ key: 'cameras.reasonCode' })}: {lastCommandResult.reasonCode ?? '-'}</div>
-                    </>
-                  )}
+                <div className={`max-h-[calc(100vh-11rem)] overflow-y-auto rounded-3xl border border-container2-border bg-container1 p-3 flex flex-col gap-3`}>
+                  <div className={`rounded-xl border border-container2-border bg-container2 p-2.5`}>
+                    <div className={`mb-2 text-[11px] font-bold uppercase tracking-widest text-common/70`}>
+                      {translate({ key: 'cameraDesign.precisionPtz' })}
+                    </div>
+
+                    <div className={`grid grid-cols-3 gap-1.5`}>
+                      <div />
+                      <button
+                        className={`h-9 rounded-md border border-container2-border bg-container1 text-common transition-colors hover:border-primary/35 disabled:opacity-60`}
+                        disabled={controlsDisabled}
+                        onClick={() => {
+                          void sendCommand('tiltUp');
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name="keyboard_arrow_up" size="20px" customClasses="text-common" />
+                        </div>
+                      </button>
+                      <div />
+
+                      <button
+                        className={`h-9 rounded-md border border-container2-border bg-container1 text-common transition-colors hover:border-primary/35 disabled:opacity-60`}
+                        disabled={controlsDisabled}
+                        onClick={() => {
+                          void sendCommand('panLeft');
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name="keyboard_arrow_left" size="20px" customClasses="text-common" />
+                        </div>
+                      </button>
+
+                      <button
+                        className={`h-9 rounded-md border border-primary/30 bg-primary/10 text-common transition-colors hover:border-primary/50`}
+                        onClick={() => {
+                          if (selectedCamera) {
+                            void loadCameraState(selectedCamera.id);
+                          }
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name="home" size="18px" customClasses="text-primary" />
+                        </div>
+                      </button>
+
+                      <button
+                        className={`h-9 rounded-md border border-container2-border bg-container1 text-common transition-colors hover:border-primary/35 disabled:opacity-60`}
+                        disabled={controlsDisabled}
+                        onClick={() => {
+                          void sendCommand('panRight');
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name="keyboard_arrow_right" size="20px" customClasses="text-common" />
+                        </div>
+                      </button>
+
+                      <div />
+                      <button
+                        className={`h-9 rounded-md border border-container2-border bg-container1 text-common transition-colors hover:border-primary/35 disabled:opacity-60`}
+                        disabled={controlsDisabled}
+                        onClick={() => {
+                          void sendCommand('tiltDown');
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name="keyboard_arrow_down" size="20px" customClasses="text-common" />
+                        </div>
+                      </button>
+                      <div />
+                    </div>
+                  </div>
+
+                  <div className={`rounded-xl border border-container2-border bg-container2 p-2.5`}>
+                    <div className={`mb-1.5 flex items-center justify-between gap-2`}>
+                      <div className={`text-[11px] font-bold uppercase tracking-widest text-common/70`}>
+                        {translate({ key: 'cameraDesign.opticalZoom' })}
+                      </div>
+                      <div className={`text-xs font-bold text-primary`}>{zoomLabel}</div>
+                    </div>
+
+                    <div className={`mx-auto flex max-w-44 items-center gap-1.5`}>
+                      <Icon name="zoom_out" size="16px" customClasses="text-common" />
+                      <input
+                        className={`w-40 accent-primary`}
+                        max={100}
+                        min={1}
+                        onChange={(event) => {
+                          setZoomLevel(Number(event.target.value));
+                        }}
+                        type="range"
+                        value={zoomLevel}
+                      />
+                      <Icon name="zoom_in" size="16px" customClasses="text-common" />
+                    </div>
+                  </div>
+
+                  <div className={`rounded-xl border border-container2-border bg-container2 p-2.5`}>
+                    <div className={`mb-1.5 text-[11px] font-bold uppercase tracking-widest text-common/70`}>
+                      {translate({ key: 'cameraDesign.infraredMode' })}
+                    </div>
+                    <div className={`grid grid-cols-3 gap-1.5`}>
+                      {[
+                        { mode: 'off' as const, key: 'cameras.irOff' },
+                        { mode: 'on' as const, key: 'cameras.irOn' },
+                        { mode: 'auto' as const, key: 'cameras.auto' },
+                      ].map((item) => {
+                        const active = currentIRMode === item.mode;
+
+                        return (
+                          <button
+                            className={`rounded-md border px-1.5 py-1.5 text-[11px] font-bold ${active ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container1 text-title'} disabled:opacity-60`}
+                            disabled={controlsDisabled}
+                            key={`desktop-${item.mode}`}
+                            onClick={() => {
+                              void setIRMode(item.mode);
+                            }}
+                            type="button"
+                          >
+                            {translate({ key: item.key })}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <button
+                    className={`rounded-xl border px-3 py-2 text-xs font-bold ${outputAudioEnabled ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'}`}
+                    onClick={() => {
+                      setOutputAudioEnabled((previous) => !previous);
+                    }}
+                    type="button"
+                  >
+                    <div className={`flex items-center justify-center gap-2`}>
+                      <Icon name={outputAudioEnabled ? 'volume_up' : 'volume_off'} size="16px" customClasses={outputAudioEnabled ? 'text-title-primary' : 'text-common'} />
+                      <span>{translate({ key: 'cameraDesign.systemAudio' })}</span>
+                    </div>
+                  </button>
+
+                  <div className={`rounded-xl border border-container2-border bg-container2 p-2.5`}>
+                    <div className={`mb-2 flex items-center justify-between gap-2`}>
+                      <div className={`text-[11px] font-bold uppercase tracking-widest text-common/70`}>
+                        {translate({ key: 'cameraDesign.commUplink' })}
+                      </div>
+                      <button
+                        className={`h-8 w-8 rounded-full border ${uplinkMicEnabled ? 'border-primary-border bg-primary/10' : 'border-container2-border bg-container1'}`}
+                        onClick={() => {
+                          setUplinkMicEnabled((previous) => !previous);
+                        }}
+                        type="button"
+                      >
+                        <div className={`flex h-full w-full items-center justify-center`}>
+                          <Icon name={uplinkMicEnabled ? 'mic' : 'mic_off'} size="16px" customClasses={uplinkMicEnabled ? 'text-primary' : 'text-common'} />
+                        </div>
+                      </button>
+                    </div>
+
+                    <div className={`h-2 w-full overflow-hidden rounded-full border border-container2-border bg-container1`}>
+                      <div className={`h-full bg-primary transition-all duration-100`} style={{ width: `${String(micLevel)}%` }} />
+                    </div>
+                  </div>
+
+                  <button
+                    className={`rounded-xl border px-3 py-2 text-xs font-bold ${recordingActive ? 'border-wrong/35 bg-wrong/15 text-wrong' : 'border-primary-border bg-primary text-title-primary'} disabled:opacity-60`}
+                    disabled={controlsDisabled}
+                    onClick={() => {
+                      void setRecording(!recordingActive);
+                    }}
+                    type="button"
+                  >
+                    {recordingActive
+                      ? translate({ key: 'cameras.recordStop' })
+                      : translate({ key: 'cameras.recordStart' })}
+                  </button>
+
+                  <div className={`rounded-xl border border-container2-border bg-container2 p-2.5 text-[11px] text-common`}>
+                    <div className={`font-semibold text-title`}>{translate({ key: 'cameras.lastCommand' })}</div>
+                    {!lastCommandResult && (
+                      <div>{translate({ key: 'cameras.noCommandYet' })}</div>
+                    )}
+                    {lastCommandResult && (
+                      <>
+                        <div>{translate({ key: 'cameras.action' })}: {lastCommandResult.action}</div>
+                        <div>{translate({ key: 'cameras.result' })}: {lastCommandResult.result}</div>
+                        <div>{translate({ key: 'cameras.reasonCode' })}: {lastCommandResult.reasonCode ?? '-'}</div>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </>
-            )}
-          </div>
-        </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -15,7 +15,15 @@ export default function middlewareHandler({
   session: SessionLayout | null 
 }) {
 
+  if (location.startsWith('/camera/')) {
+    return session ? { success: true } : { redirect: '/login' };
+  }
+
   switch (location) {
+
+    case '/dashboard': {
+      return session ? { success: true } : { redirect: '/login' };
+    }
 
     case '/admin': {
       if (!session) {
