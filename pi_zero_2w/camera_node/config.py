@@ -52,9 +52,8 @@ def _load_env_file(path: Path) -> None:
 @dataclass(slots=True)
 class NodeSettings:
     pi5_base_url: str
-    node_id: str
+    camera_ip: str
     node_secret: str
-    camera_id: str
     adapter: str
     poll_interval_ms: int
     telemetry_interval_sec: float
@@ -85,17 +84,15 @@ def load_settings() -> NodeSettings:
     _load_env_file(Path(env_file))
 
     pi5_base_url = os.getenv("PI5_BASE_URL", "").strip().rstrip("/")
-    node_id = os.getenv("NODE_ID", "").strip()
+    camera_ip = os.getenv("CAMERA_IP", "").strip()
     node_secret = os.getenv("NODE_SECRET", "").strip()
-    camera_id = os.getenv("CAMERA_ID", "").strip()
 
     missing = [
         key
         for key, value in {
             "PI5_BASE_URL": pi5_base_url,
-            "NODE_ID": node_id,
+            "CAMERA_IP": camera_ip,
             "NODE_SECRET": node_secret,
-            "CAMERA_ID": camera_id,
         }.items()
         if not value
     ]
@@ -106,9 +103,8 @@ def load_settings() -> NodeSettings:
 
     settings = NodeSettings(
         pi5_base_url=pi5_base_url,
-        node_id=node_id,
+        camera_ip=camera_ip,
         node_secret=node_secret,
-        camera_id=camera_id,
         adapter=os.getenv("HARDWARE_ADAPTER", "mock").strip().lower() or "mock",
         poll_interval_ms=max(200, _parse_int(os.getenv("POLL_INTERVAL_MS"), 750)),
         telemetry_interval_sec=max(1.0, _parse_float(os.getenv("TELEMETRY_INTERVAL_SEC"), 5.0)),

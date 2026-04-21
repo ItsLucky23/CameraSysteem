@@ -132,8 +132,8 @@ This section is for your exact current state: Pi Zero is flashed and reachable b
    Why: server/client and Prisma commands require local packages.
 3. Run Prisma generate and db push.
    Why: camera models/tables must exist before node APIs can work.
-4. Create camera records in database with matching `cameraId` and `nodeId`.
-   Why: Pi Zero telemetry and command polling are rejected if IDs do not match DB records.
+4. Create camera records in database with `Camera.ip` set to the Pi camera IP.
+   Why: Pi Zero telemetry and command polling resolve the camera by IP plus shared secret.
 5. Start Pi5 app services (server and client).
    Why: Pi Zero needs live API endpoints for polling and telemetry.
 6. Open admin pages and verify users can be granted per-camera access.
@@ -149,8 +149,7 @@ This section is for your exact current state: Pi Zero is flashed and reachable b
    Why: runtime is intentionally isolated from global Python packages.
 4. Create `.env` from `.env.example` and fill required values:
    - `PI5_BASE_URL`
-   - `NODE_ID`
-   - `CAMERA_ID`
+   - `CAMERA_IP`
    - `NODE_SECRET`
    - `PAN_SERVO_GPIO_PIN`
    - `TILT_SERVO_GPIO_PIN`

@@ -21,7 +21,7 @@ class CameraState:
 class CameraCommand:
     command_id: str
     camera_id: str
-    node_id: str
+    camera_ip: str
     action: str
     payload: dict[str, Any] = field(default_factory=dict)
     requested_by_user_id: str = ""
@@ -31,7 +31,7 @@ class CameraCommand:
     def from_api(cls, value: Mapping[str, Any]) -> "CameraCommand":
         command_id = str(value.get("commandId", "")).strip()
         camera_id = str(value.get("cameraId", "")).strip()
-        node_id = str(value.get("nodeId", "")).strip()
+        camera_ip = str(value.get("cameraIp", value.get("nodeId", ""))).strip()
         action = str(value.get("action", "")).strip()
 
         payload_raw = value.get("payload")
@@ -40,7 +40,7 @@ class CameraCommand:
         return cls(
             command_id=command_id,
             camera_id=camera_id,
-            node_id=node_id,
+            camera_ip=camera_ip,
             action=action,
             payload=payload,
             requested_by_user_id=str(value.get("requestedByUserId", "")).strip(),

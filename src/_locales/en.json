@@ -282,6 +282,8 @@
     "namePlaceholder": "Front Entrance",
     "slug": "Slug",
     "slugPlaceholder": "front-entrance",
+    "cameraIp": "Camera IP",
+    "cameraIpPlaceholder": "192.168.1.42",
     "nodeId": "Node ID",
     "nodeIdPlaceholder": "node-main-01",
     "streamUrl": "Stream URL",

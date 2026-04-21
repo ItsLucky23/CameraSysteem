@@ -6,15 +6,15 @@ const NODE_COMMAND_CHANNEL = `${projectPrefix}camera-node:commands`;
 export interface CameraNodeCommand {
   commandId: string;
   cameraId: string;
-  nodeId: string;
+  cameraIp: string;
   action: string;
   payload: Record<string, string | number | boolean | null>;
   requestedByUserId: string;
   requestedAt: string;
 }
 
-export const getNodeQueueKey = (nodeId: string): string => {
-  return `${projectPrefix}camera-node:queue:${nodeId}`;
+export const getNodeQueueKey = (cameraIp: string): string => {
+  return `${projectPrefix}camera-node:queue:${cameraIp}`;
 };
 
 export const getCommandChannel = (): string => {
@@ -22,14 +22,14 @@ export const getCommandChannel = (): string => {
 };
 
 export const enqueueCommand = async ({
-  nodeId,
+  cameraIp,
   cameraId,
   commandId,
   action,
   payload,
   requestedByUserId,
 }: {
-  nodeId: string;
+  cameraIp: string;
   cameraId: string;
   commandId: string;
   action: string;
@@ -39,8 +39,8 @@ export const enqueueCommand = async ({
   queued: boolean;
   publishedReceivers: number;
 }> => {
-  const normalizedNodeId = nodeId.trim();
-  if (!normalizedNodeId) {
+  const normalizedCameraIp = cameraIp.trim();
+  if (!normalizedCameraIp) {
     return {
       queued: false,
       publishedReceivers: 0,
@@ -50,7 +50,7 @@ export const enqueueCommand = async ({
   const command: CameraNodeCommand = {
     commandId,
     cameraId,
-    nodeId: normalizedNodeId,
+    cameraIp: normalizedCameraIp,
     action,
     payload: payload ?? {},
     requestedByUserId,
@@ -58,7 +58,7 @@ export const enqueueCommand = async ({
   };
 
   const message = JSON.stringify(command);
-  const queueKey = getNodeQueueKey(normalizedNodeId);
+  const queueKey = getNodeQueueKey(normalizedCameraIp);
 
   await redis.rpush(queueKey, message);
   await redis.expire(queueKey, 60 * 60 * 24);
@@ -96,19 +96,19 @@ const toCommandArray = (value: string | string[] | null): CameraNodeCommand[] =>
 };
 
 export const getPendingCommands = async ({
-  nodeId,
+  cameraIp,
   limit = 20,
 }: {
-  nodeId: string;
+  cameraIp: string;
   limit?: number;
 }): Promise<CameraNodeCommand[]> => {
-  const normalizedNodeId = nodeId.trim();
-  if (!normalizedNodeId) {
+  const normalizedCameraIp = cameraIp.trim();
+  if (!normalizedCameraIp) {
     return [];
   }
 
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
-  const queueKey = getNodeQueueKey(normalizedNodeId);
+  const queueKey = getNodeQueueKey(normalizedCameraIp);
 
   const raw = await redis.lpop(queueKey, safeLimit);
   return toCommandArray(raw);

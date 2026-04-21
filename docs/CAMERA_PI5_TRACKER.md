@@ -26,7 +26,7 @@ This file tracks:
 7. Start one or more Pi Zero camera nodes with the same CAMERA_NODE_SHARED_SECRET.
 8. On each Pi Zero, copy and fill:
   - pi_zero_2w/.env.example -> pi_zero_2w/.env
-  - set PI5_BASE_URL, NODE_ID, CAMERA_ID, NODE_SECRET
+  - set PI5_BASE_URL, CAMERA_IP, NODE_SECRET
 9. On each Pi Zero, run the node from a dedicated venv only:
   - python3 -m venv .venv
   - source .venv/bin/activate

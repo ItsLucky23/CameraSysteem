@@ -18,9 +18,8 @@ type CommandResultStatus = 'executed' | 'failed' | 'rejected';
 
 export interface ApiParams {
   data: {
-    nodeId: string;
+    cameraIp: string;
     nodeSecret: string;
-    cameraId: string;
     isOnline: boolean;
     mode?: CameraMode;
     irMode?: IRMode;
@@ -111,11 +110,10 @@ const buildCameraPatch = ({
 };
 
 export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
-  const nodeId = data.nodeId.trim();
+  const cameraIp = data.cameraIp.trim();
   const nodeSecret = data.nodeSecret.trim();
-  const cameraId = data.cameraId.trim();
 
-  if (!nodeId || !nodeSecret || !cameraId || typeof data.isOnline !== 'boolean') {
+  if (!cameraIp || !nodeSecret || typeof data.isOnline !== 'boolean') {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -179,8 +177,11 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   }
 
   const [cameraReadError, camera] = await tryCatch(async () => {
-    return functions.db.prisma.camera.findUnique({
-      where: { id: cameraId },
+    return functions.db.prisma.camera.findFirst({
+      where: { nodeId: cameraIp },
+      orderBy: {
+        updatedAt: 'desc',
+      },
     });
   });
 
@@ -192,9 +193,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     return { status: 'error', errorCode: 'camera.notFound', httpStatus: 404 };
   }
 
-  if (camera.nodeId !== nodeId) {
-    return { status: 'error', errorCode: 'camera.nodeUnauthorized', httpStatus: 403 };
-  }
+  const cameraId = camera.id;
 
   const modeFromRecording: CameraMode | undefined = typeof data.recording === 'boolean'
     ? (data.recording ? 'record' : 'live')
@@ -319,6 +318,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   return {
     status: 'success',
     cameraId,
+    cameraIp,
     receivedAt: new Date().toISOString(),
   };
 };

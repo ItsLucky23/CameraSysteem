@@ -384,7 +384,7 @@ export const useSyncEvents = () => {
     }
 
     const fullName = `sync/${sanitizedName}/${params.version}`;
-    const callback = params.callback as unknown as SyncEventCallback;
+    const callback = params.callback as SyncEventCallback;
     const callbacks = getCallbacksForRoute(fullName);
 
     const previousForRoute = localRegistryRef.current.get(fullName);

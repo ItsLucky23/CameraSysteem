@@ -13,7 +13,7 @@ interface CameraCatalogItem {
   id: string;
   slug: string;
   name: string;
-  nodeId: string;
+  cameraIp: string;
   streamUrl: string;
   isOnline: boolean;
   mode: 'off' | 'idle' | 'live' | 'record';
@@ -131,12 +131,12 @@ export default function AdminPage() {
   const [form, setForm] = useState<{
     slug: string;
     name: string;
-    nodeId: string;
+    cameraIp: string;
     streamUrl: string;
   }>({
     slug: '',
     name: '',
-    nodeId: '',
+    cameraIp: '',
     streamUrl: '',
   });
 
@@ -283,11 +283,11 @@ export default function AdminPage() {
     const payload = {
       slug: form.slug.trim().toLowerCase(),
       name: form.name.trim(),
-      nodeId: form.nodeId.trim(),
+      cameraIp: form.cameraIp.trim(),
       streamUrl: form.streamUrl.trim(),
     };
 
-    if (!payload.slug || !payload.name || !payload.nodeId || !payload.streamUrl) {
+    if (!payload.slug || !payload.name || !payload.cameraIp || !payload.streamUrl) {
       notify.error({ key: 'camera.invalidInput' });
       return;
     }
@@ -329,7 +329,7 @@ export default function AdminPage() {
     }
 
     setCameraCatalog((previous) => [parsedBody.camera, ...previous].sort((first, second) => first.name.localeCompare(second.name)));
-    setForm({ slug: '', name: '', nodeId: '', streamUrl: '' });
+    setForm({ slug: '', name: '', cameraIp: '', streamUrl: '' });
     setPanelOpen(false);
     setSavingCamera(false);
     notify.success({ key: 'adminCameraManager.created' });
@@ -344,11 +344,11 @@ export default function AdminPage() {
       cameraId: panelCameraId,
       slug: form.slug.trim().toLowerCase(),
       name: form.name.trim(),
-      nodeId: form.nodeId.trim(),
+      cameraIp: form.cameraIp.trim(),
       streamUrl: form.streamUrl.trim(),
     };
 
-    if (!payload.slug || !payload.name || !payload.nodeId || !payload.streamUrl) {
+    if (!payload.slug || !payload.name || !payload.cameraIp || !payload.streamUrl) {
       notify.error({ key: 'camera.invalidInput' });
       return;
     }
@@ -448,7 +448,7 @@ export default function AdminPage() {
   const openCreatePanel = useCallback(() => {
     setPanelMode('create');
     setPanelCameraId(null);
-    setForm({ slug: '', name: '', nodeId: '', streamUrl: '' });
+    setForm({ slug: '', name: '', cameraIp: '', streamUrl: '' });
     setDisableFeed(false);
     setPanelOpen(true);
   }, []);
@@ -459,7 +459,7 @@ export default function AdminPage() {
     setForm({
       slug: camera.slug,
       name: camera.name,
-      nodeId: camera.nodeId,
+      cameraIp: camera.cameraIp,
       streamUrl: camera.streamUrl,
     });
     setDisableFeed(!camera.isOnline);
@@ -839,16 +839,16 @@ export default function AdminPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-widest text-common/80">{translate({ key: 'adminCameraManager.nodeId' })}</label>
+                  <label className="text-xs font-bold uppercase tracking-widest text-common/80">{translate({ key: 'adminCameraManager.cameraIp' })}</label>
                   <div className="flex items-center gap-2 border-b-2 border-container2-border pb-2">
                     <Icon name="hub" size="18px" customClasses="text-common" />
                     <input
                       className="w-full border-none bg-transparent p-0 text-sm font-medium text-title outline-none"
                       onChange={(event) => {
-                        setForm((previous) => ({ ...previous, nodeId: event.target.value }));
+                        setForm((previous) => ({ ...previous, cameraIp: event.target.value }));
                       }}
-                      placeholder={translate({ key: 'adminCameraManager.nodeIdPlaceholder' })}
-                      value={form.nodeId}
+                      placeholder={translate({ key: 'adminCameraManager.cameraIpPlaceholder' })}
+                      value={form.cameraIp}
                     />
                   </div>
                 </div>

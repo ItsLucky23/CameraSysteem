@@ -27,16 +27,14 @@ def read_cpu_temperature_c(cpu_temp_path: str) -> float | None:
 
 def to_ingest_payload(
     *,
-    node_id: str,
+    camera_ip: str,
     node_secret: str,
-    camera_id: str,
     state: CameraState,
     command_result: CommandResult | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
-        "nodeId": node_id,
+        "cameraIp": camera_ip,
         "nodeSecret": node_secret,
-        "cameraId": camera_id,
         "isOnline": state.is_online,
         "mode": state.mode,
         "irMode": state.ir_mode,

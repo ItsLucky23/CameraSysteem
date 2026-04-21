@@ -47,7 +47,7 @@ export const main = async ({ functions }: ApiParams): Promise<ApiResponse> => {
       id: camera.id,
       slug: camera.slug,
       name: camera.name,
-      nodeId: camera.nodeId,
+      cameraIp: camera.nodeId,
       streamUrl: camera.streamUrl,
       isOnline: camera.isOnline,
       mode: camera.mode,

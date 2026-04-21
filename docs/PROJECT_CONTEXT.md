@@ -176,6 +176,7 @@ When a user logs in, the system automatically kicks all previous sessions for th
 - Added `CAMERA_NODE_SHARED_SECRET` and `CAMERA_WEBRTC_SIGNALING_URL` to `.env_template` and `.env.local_template`.
 - Added Pi Zero runtime package in `pi_zero_2w/` (Python-based camera node worker):
   - polls `api/cameras/getPendingNodeCommands/v1`
+  - identifies target camera queue by camera IP (stored in `Camera.ip`) + shared secret
   - executes PTZ/IR/record commands via adapter layer
   - supports SG90 pan/tilt servo control via `PAN_SERVO_GPIO_PIN` and `TILT_SERVO_GPIO_PIN`
   - posts telemetry and command results to `api/cameras/ingestNodeTelemetry/v1`

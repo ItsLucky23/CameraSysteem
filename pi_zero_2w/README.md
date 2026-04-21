@@ -55,7 +55,7 @@ pi_zero_2w/
 1. Raspberry Pi OS (Bookworm or Bullseye)
 2. Python 3.11+
 3. Network access to Pi5 backend URL
-4. `NODE_ID`, `CAMERA_ID`, and shared secret that match Pi5 database/config
+4. `CAMERA_IP` and shared secret that match Pi5 camera configuration
 
 ## Setup
 
@@ -70,14 +70,13 @@ pi_zero_2w/
    - `cp .env.example .env`
 5. Edit `.env` with real values:
    - `PI5_BASE_URL`
-   - `NODE_ID`
-   - `CAMERA_ID`
+   - `CAMERA_IP`
    - `NODE_SECRET`
 
 ## Required Pi5-side assumptions
 
 1. `CAMERA_NODE_SHARED_SECRET` is configured on Pi5 and matches `NODE_SECRET`.
-2. A `Camera` record exists where `Camera.id == CAMERA_ID` and `Camera.nodeId == NODE_ID`.
+2. A `Camera` record exists where `Camera.ip == CAMERA_IP`.
 3. Pi5 APIs are reachable from the Pi Zero:
    - `/api/cameras/getPendingNodeCommands/v1`
    - `/api/cameras/ingestNodeTelemetry/v1`
@@ -174,7 +173,7 @@ journalctl -u camera-node.service -f
 
 Every telemetry update includes:
 
-- node and camera identity
+- camera IP identity
 - `isOnline`
 - mode and IR fields
 - pan/tilt
@@ -212,9 +211,8 @@ Recommended extension points:
 
 1. `camera.nodeUnauthorized`:
    - check `NODE_SECRET`
-   - check `NODE_ID` matches `Camera.nodeId`
 2. `camera.notFound`:
-   - check `CAMERA_ID`
+   - check `CAMERA_IP` matches `Camera.ip`
 3. No commands arriving:
    - check Pi5 command dispatch is writing queue entries
    - verify Pi Zero can reach Pi5 URL

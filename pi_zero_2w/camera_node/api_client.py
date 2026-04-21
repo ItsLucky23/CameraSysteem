@@ -45,14 +45,14 @@ class Pi5ApiClient:
     async def get_pending_commands(
         self,
         *,
-        node_id: str,
+        camera_ip: str,
         node_secret: str,
         limit: int,
     ) -> list[CameraCommand]:
         response = await self._post(
             endpoint="/api/cameras/getPendingNodeCommands/v1",
             data={
-                "nodeId": node_id,
+                "cameraIp": camera_ip,
                 "nodeSecret": node_secret,
                 "limit": limit,
             },

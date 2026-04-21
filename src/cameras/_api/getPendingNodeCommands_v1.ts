@@ -12,7 +12,7 @@ export const auth: AuthProps = {
 
 export interface ApiParams {
   data: {
-    nodeId: string;
+    cameraIp: string;
     nodeSecret: string;
     limit?: number;
   };
@@ -21,10 +21,10 @@ export interface ApiParams {
 }
 
 export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
-  const nodeId = data.nodeId.trim();
+  const cameraIp = data.cameraIp.trim();
   const nodeSecret = data.nodeSecret.trim();
 
-  if (!nodeId || !nodeSecret) {
+  if (!cameraIp || !nodeSecret) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -39,7 +39,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   const [pendingError, commands] = await tryCatch(async () => {
     return functions.cameraNode.getPendingCommands({
-      nodeId,
+      cameraIp,
       limit: typeof data.limit === 'number' ? data.limit : 20,
     });
   });
@@ -50,7 +50,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   return {
     status: 'success',
-    nodeId,
+    cameraIp,
     channel: functions.cameraNode.getCommandChannel(),
     commands,
   };

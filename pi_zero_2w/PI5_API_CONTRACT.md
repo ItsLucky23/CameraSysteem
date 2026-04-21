@@ -12,11 +12,9 @@ Request body:
 
 ```json
 {
-  "data": {
-    "nodeId": "pi-zero-2w-cam01",
-    "nodeSecret": "<shared-secret>",
-    "limit": 20
-  }
+  "cameraIp": "192.168.1.42",
+  "nodeSecret": "<shared-secret>",
+  "limit": 20
 }
 ```
 
@@ -25,13 +23,13 @@ Success response shape:
 ```json
 {
   "status": "success",
-  "nodeId": "pi-zero-2w-cam01",
+  "cameraIp": "192.168.1.42",
   "channel": "camera-node:commands",
   "commands": [
     {
       "commandId": "cmd-123",
       "cameraId": "camera-1",
-      "nodeId": "pi-zero-2w-cam01",
+      "cameraIp": "192.168.1.42",
       "action": "panLeft",
       "payload": {},
       "requestedByUserId": "user-1",
@@ -58,25 +56,22 @@ Request body:
 
 ```json
 {
-  "data": {
-    "nodeId": "pi-zero-2w-cam01",
-    "nodeSecret": "<shared-secret>",
-    "cameraId": "camera-1",
-    "isOnline": true,
-    "mode": "live",
-    "irMode": "auto",
-    "irEnabled": false,
-    "pan": 0,
-    "tilt": 0,
-    "temperatureC": 47.2,
-    "motionDetected": false,
-    "recording": false,
-    "commandResult": {
-      "commandId": "cmd-123",
-      "action": "panLeft",
-      "result": "executed",
-      "reasonCode": "camera.commandFailed"
-    }
+  "cameraIp": "192.168.1.42",
+  "nodeSecret": "<shared-secret>",
+  "isOnline": true,
+  "mode": "live",
+  "irMode": "auto",
+  "irEnabled": false,
+  "pan": 0,
+  "tilt": 0,
+  "temperatureC": 47.2,
+  "motionDetected": false,
+  "recording": false,
+  "commandResult": {
+    "commandId": "cmd-123",
+    "action": "panLeft",
+    "result": "executed",
+    "reasonCode": "camera.commandFailed"
   }
 }
 ```
@@ -102,7 +97,7 @@ Common Pi5 errors:
 These two APIs are public at route-level (`login: false`) but secured via shared secret:
 
 - `nodeSecret` must equal Pi5 `CAMERA_NODE_SHARED_SECRET`
-- `nodeId` must match the target camera's `nodeId`
+- `cameraIp` resolves the target camera using `Camera.ip`
 
 ## 4) Rate limits on Pi5
 

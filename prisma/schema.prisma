@@ -86,7 +86,7 @@ model Camera {
   name         String
   streamKey    String    @unique
   streamUrl    String
-  nodeId       String
+  ip           String    @map("nodeId")
   isOnline     Boolean   @default(false)
   mode         CAMERA_MODE @default(idle)
   irMode       IR_MODE   @default(auto)
@@ -104,7 +104,7 @@ model Camera {
   snapshots    CameraStateSnapshot[]
 
   @@map("cameras")
-  @@index([nodeId])
+  @@index([ip])
   @@index([isOnline, updatedAt])
 }
 

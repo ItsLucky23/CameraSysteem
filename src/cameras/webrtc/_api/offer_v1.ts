@@ -103,6 +103,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   }
 
   const [signalError, signalResponse] = await tryCatch(async () => {
+    const cameraIp = camera.nodeId;
+
     return fetch(`${signalingUrl.replace(/\/$/, '')}/offer`, {
       method: 'POST',
       headers: {
@@ -110,7 +112,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       },
       body: JSON.stringify({
         cameraId,
-        nodeId: camera.nodeId,
+        cameraIp,
+        nodeId: cameraIp,
         offerSdp,
         previewToken,
       }),

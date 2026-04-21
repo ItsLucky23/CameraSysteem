@@ -15,7 +15,7 @@ export interface ApiParams {
     cameraId: string;
     slug: string;
     name: string;
-    nodeId: string;
+    cameraIp: string;
     streamUrl: string;
   };
   user: SessionLayout;
@@ -23,19 +23,24 @@ export interface ApiParams {
 }
 
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
 export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
   const cameraId = data.cameraId.trim();
   const slug = data.slug.trim().toLowerCase();
   const name = data.name.trim();
-  const nodeId = data.nodeId.trim();
+  const cameraIp = data.cameraIp.trim();
   const streamUrl = data.streamUrl.trim();
 
-  if (!cameraId || !slug || !name || !nodeId || !streamUrl) {
+  if (!cameraId || !slug || !name || !cameraIp || !streamUrl) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
   if (!slugRegex.test(slug)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (!ipv4Regex.test(cameraIp)) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -80,26 +85,32 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     return { status: 'error', errorCode: 'camera.slugTaken', httpStatus: 409 };
   }
 
+  const [ipCheckError, ipCamera] = await tryCatch(async () => {
+    return functions.db.prisma.camera.findFirst({
+      where: {
+        nodeId: cameraIp,
+        NOT: { id: cameraId },
+      },
+      select: { id: true },
+    });
+  });
+
+  if (ipCheckError) {
+    return { status: 'error', errorCode: 'camera.unexpectedError', httpStatus: 500 };
+  }
+
+  if (ipCamera) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 409 };
+  }
+
   const [updateError, updatedCamera] = await tryCatch(async () => {
     return functions.db.prisma.camera.update({
       where: { id: cameraId },
       data: {
         slug,
         name,
-        nodeId,
+        nodeId: cameraIp,
         streamUrl,
-      },
-      select: {
-        id: true,
-        slug: true,
-        name: true,
-        nodeId: true,
-        streamUrl: true,
-        isOnline: true,
-        mode: true,
-        lastSeenAt: true,
-        createdAt: true,
-        updatedAt: true,
       },
     });
   });
@@ -114,7 +125,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
       id: updatedCamera.id,
       slug: updatedCamera.slug,
       name: updatedCamera.name,
-      nodeId: updatedCamera.nodeId,
+      cameraIp: updatedCamera.nodeId,
       streamUrl: updatedCamera.streamUrl,
       isOnline: updatedCamera.isOnline,
       mode: updatedCamera.mode,

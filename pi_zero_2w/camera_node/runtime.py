@@ -35,7 +35,7 @@ class CameraNodeRuntime:
         self._running = False
 
     async def run(self) -> None:
-        logger.info("Starting camera node runtime for camera %s", self._settings.camera_id)
+        logger.info("Starting camera node runtime for camera IP %s", self._settings.camera_ip)
         await self._adapter.startup()
 
         try:
@@ -47,7 +47,7 @@ class CameraNodeRuntime:
 
                     try:
                         commands = await self._api_client.get_pending_commands(
-                            node_id=self._settings.node_id,
+                            camera_ip=self._settings.camera_ip,
                             node_secret=self._settings.node_secret,
                             limit=self._settings.command_batch_limit,
                         )
@@ -82,9 +82,8 @@ class CameraNodeRuntime:
             state.temperature_c = read_cpu_temperature_c(self._settings.cpu_temp_path)
 
         payload = to_ingest_payload(
-            node_id=self._settings.node_id,
+            camera_ip=self._settings.camera_ip,
             node_secret=self._settings.node_secret,
-            camera_id=self._settings.camera_id,
             state=state,
             command_result=command_result,
         )

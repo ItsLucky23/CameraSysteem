@@ -145,7 +145,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           console.error("Invalid name");
           notify.error({ key: 'api.invalidName' });
         }
-        resolve(null as unknown as RequestOutput);
+        resolve({ status: 'error', httpStatus: 400, message: 'api.invalidName', errorCode: 'api.invalidName' } as RequestOutput);
         return;
       }
 
@@ -154,18 +154,18 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           console.error("Invalid version");
           notify.error({ key: 'api.invalidVersion' });
         }
-        resolve(null as unknown as RequestOutput);
+        resolve({ status: 'error', httpStatus: 400, message: 'api.invalidVersion', errorCode: 'api.invalidVersion' } as RequestOutput);
         return;
       }
 
       const data = payloadData && typeof payloadData === "object" ? payloadData : {};
 
       if (!await waitForSocket()) {
-        resolve(null as unknown as RequestOutput);
+        resolve({ status: 'error', httpStatus: 503, message: 'api.ioUnavailable', errorCode: 'api.ioUnavailable' } as RequestOutput);
         return;
       }
       if (!socket) {
-        resolve(null as unknown as RequestOutput);
+        resolve({ status: 'error', httpStatus: 503, message: 'api.ioUnavailable', errorCode: 'api.ioUnavailable' } as RequestOutput);
         return;
       }
 
