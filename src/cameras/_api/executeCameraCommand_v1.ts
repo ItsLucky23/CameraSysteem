@@ -159,7 +159,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   const [dispatchError, dispatchResult] = await tryCatch(async () => {
     return functions.cameraNode.enqueueCommand({
-      cameraIp: camera.nodeId,
+      cameraIp: camera.ip,
       cameraId,
       commandId,
       action: actionValue,

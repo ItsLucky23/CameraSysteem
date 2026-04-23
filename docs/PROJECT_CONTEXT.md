@@ -173,7 +173,8 @@ When a user logs in, the system automatically kicks all previous sessions for th
   - `sync/admin/camera-access/userForcedLeaveCameraRoom/v1`
 - Added Redis-based command lock helper using keys like `lock:camera:{cameraId}:action:{action}` (with project prefix when configured).
 - Added `server/functions/cameraNode.ts` as Pi5 command bridge (Redis queue + Redis pub/sub channel for camera node commands).
-- Added `CAMERA_NODE_SHARED_SECRET` and `CAMERA_WEBRTC_SIGNALING_URL` to `.env_template` and `.env.local_template`.
+- Added `CAMERA_NODE_SHARED_SECRET` to `.env_template` and `.env.local_template`.
+- `CAMERA_WEBRTC_SIGNALING_URL` is now optional/deprecated for legacy setups; primary preview path handles offer/answer inside npm server.
 - Added Pi Zero runtime package in `pi_zero_2w/` (Python-based camera node worker):
   - polls `api/cameras/getPendingNodeCommands/v1`
   - identifies target camera queue by camera IP (stored in `Camera.ip`) + shared secret

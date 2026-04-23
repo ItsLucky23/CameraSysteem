@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import asyncio
 
+import logging
+
 from camera_node.adapters.base import HardwareAdapter
 from camera_node.models import CameraState
+
+
+logger = logging.getLogger(__name__)
 
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:
@@ -66,3 +71,11 @@ class MockHardwareAdapter(HardwareAdapter):
         await asyncio.sleep(0)
         self._state.recording = recording
         self._state.mode = "record" if recording else "live"
+
+    async def start_video_stream(self, *, rtp_host: str, rtp_port: int) -> None:
+        await asyncio.sleep(0)
+        logger.info("MockHardwareAdapter: pretending to start RTP stream to %s:%s", rtp_host, rtp_port)
+
+    async def stop_video_stream(self) -> None:
+        await asyncio.sleep(0)
+        logger.info("MockHardwareAdapter: pretending to stop RTP stream")

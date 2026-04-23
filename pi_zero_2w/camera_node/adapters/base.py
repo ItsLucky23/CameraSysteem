@@ -33,3 +33,11 @@ class HardwareAdapter(ABC):
     @abstractmethod
     async def set_recording(self, recording: bool) -> None:
         """Start or stop recording pipeline."""
+
+    @abstractmethod
+    async def start_video_stream(self, *, rtp_host: str, rtp_port: int) -> None:
+        """Start sending H.264 RTP to the Pi 5 ingest endpoint."""
+
+    @abstractmethod
+    async def stop_video_stream(self) -> None:
+        """Stop the H.264 RTP stream to Pi 5."""

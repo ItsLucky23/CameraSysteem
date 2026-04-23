@@ -23,8 +23,6 @@ const projectPrefix = process.env.PROJECT_NAME ? `${process.env.PROJECT_NAME}-` 
 
 export const getCameraRoomCode = (cameraId: string): string => `camera-${cameraId}`;
 
-export const getCameraPreviewTokenKey = (token: string): string => `${projectPrefix}camera-preview-token:${token}`;
-
 export const getCameraLockKey = ({
   cameraId,
   action,

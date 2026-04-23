@@ -1,6 +1,6 @@
 # Camera Pi5 Tracker
 
-Last updated: 2026-04-10
+Last updated: 2026-04-23
 
 ## Purpose
 
@@ -13,21 +13,16 @@ This file tracks:
 
 1. Set real secrets in .env.local:
    - CAMERA_NODE_SHARED_SECRET
-2. Set the signaling URL in .env.local:
-   - CAMERA_WEBRTC_SIGNALING_URL
-   - Example: http://localhost:8090
-3. Apply Prisma changes after pulling this branch:
+2. Apply Prisma changes after pulling this branch:
    - npm run prisma:generate
    - npm run prisma:db:push
-4. Seed/create initial cameras in the database (Camera records).
-5. Grant initial access in the database (CameraAccess) or via admin UI once users/cameras exist.
-6. Run a WebRTC signaling service that accepts offer proxy calls at:
-   - POST {CAMERA_WEBRTC_SIGNALING_URL}/offer
-7. Start one or more Pi Zero camera nodes with the same CAMERA_NODE_SHARED_SECRET.
-8. On each Pi Zero, copy and fill:
+3. Seed/create initial cameras in the database (Camera records).
+4. Grant initial access in the database (CameraAccess) or via admin UI once users/cameras exist.
+5. Start one or more Pi Zero camera nodes with the same CAMERA_NODE_SHARED_SECRET.
+6. On each Pi Zero, copy and fill:
   - pi_zero_2w/.env.example -> pi_zero_2w/.env
   - set PI5_BASE_URL, CAMERA_IP, NODE_SECRET
-9. On each Pi Zero, run the node from a dedicated venv only:
+7. On each Pi Zero, run the node from a dedicated venv only:
   - python3 -m venv .venv
   - source .venv/bin/activate
   - pip install -r requirements.txt
@@ -52,10 +47,11 @@ This file tracks:
   - api/cameras/setRecordingMode/v1
   - api/cameras/getPendingNodeCommands/v1
   - api/cameras/ingestNodeTelemetry/v1
-- WebRTC offer proxy API:
+- WebRTC offer API (npm server local bridge):
   - api/cameras/webrtc/offer/v1
   - validates preview token + camera access
-  - proxies offer to CAMERA_WEBRTC_SIGNALING_URL
+  - builds SDP answer in-process on Pi5/npm server
+  - forwards Pi Zero WebRTC video (and audio, when enabled) into the browser peer connection
 - Admin camera access APIs:
   - api/admin/camera-access/getUserCameraAccessMatrix/v1
   - api/admin/camera-access/updateCameraAccess/v1
@@ -77,7 +73,7 @@ This file tracks:
   - /cameras
   - camera list, state panel, command buttons, preview-session creation, last command result
   - in-browser WebRTC preview playback (create session + start/stop stream)
-  - /cameras monitor flow is WebRTC-first (MJPEG is kept only as temporary debug/bring-up path)
+  - /cameras monitor flow is WebRTC-only; MJPEG has been removed from the codebase
   - live sync subscriptions for state updates and command results
 - Admin access matrix page:
   - /admin/camera-access
@@ -90,10 +86,10 @@ This file tracks:
 
 ## Remaining (Pi5)
 
-1. Add camera command/audit timeline UI using CameraCommand and CameraEvent history.
-2. Add pagination/filtering for large access matrices.
-3. Add rate-limit and lock visibility indicators in UI (cooldown/locked feedback).
-4. Add operational docs for signaling service contract and deployment topology.
+1. Finish the Pi5 side of the full WebRTC transport change (signaling flow + bridge wiring for the new Pi Zero transport — see Next Phase below).
+2. Add camera command/audit timeline UI using CameraCommand and CameraEvent history.
+3. Add pagination/filtering for large access matrices.
+4. Add rate-limit and lock visibility indicators in UI (cooldown/locked feedback).
 
 ## Latest Validation
 
@@ -108,6 +104,6 @@ This file tracks:
   - deployment instructions, env template, and systemd service template
   - PTZ motor model selected: Micro Servo 9g (SG90)
 2. Remaining:
-  - integrate real camera capture/stream pipeline with signaling server
+  - build the real video capture + WebRTC transport on the Pi Zero (architecture pending — see discussion; MJPEG test path has been removed)
   - set and validate per-device GPIO pin mapping for SG90 pan/tilt servos
   - add persistent health/watchdog metrics if required by ops

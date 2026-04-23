@@ -37,9 +37,7 @@ model Camera {
   id                String                 @id @default(uuid()) @map("_id")
   slug              String                 @unique
   name              String
-  streamKey         String                 @unique
-  streamUrl         String
-  nodeId            String
+  ip                String
   isOnline          Boolean                @default(false)
   mode              CAMERA_MODE            @default(idle)
   irMode            IR_MODE                @default(auto)
@@ -57,7 +55,7 @@ model Camera {
   snapshots         CameraStateSnapshot[]
 
   @@map("cameras")
-  @@index([nodeId])
+  @@index([ip])
   @@index([isOnline, updatedAt])
 }
 
@@ -333,7 +331,6 @@ Success response:
   status: 'success',
   transport: 'webrtc';
   cameraId: string;
-  streamKey: string;
   signaling: {
     offerUrl: string;
     iceServers: { urls: string; username?: string; credential?: string }[];

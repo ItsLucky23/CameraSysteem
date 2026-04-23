@@ -10,6 +10,7 @@ import allowedOrigin from '../auth/checkOrigin';
 import { initAcitivityBroadcaster, socketConnected, socketDisconnecting, socketLeaveRoom } from './utils/activityBroadcaster';
 import config, { SessionLayout } from '../../config';
 import { extractTokenFromSocket } from '../utils/extractToken';
+import { notifySocketConnected, notifySocketDisconnected } from '../utils/cameraStreamOrchestrator';
 
 //? Per-token lock to serialize session mutations (prevents read-modify-write races)
 const sessionLocks = new Map<string, Promise<void>>();
@@ -88,6 +89,7 @@ export default function loadSocket(httpServer: any) {
 
     if (token) {
       socketConnected({ token, io });
+      notifySocketConnected(socket.id);
     }
 
     socket.on('apiRequest', async (msg: apiMessage) => {
@@ -180,6 +182,10 @@ export default function loadSocket(httpServer: any) {
     });
 
     socket.on('disconnect', async (reason) => {
+      if (token) {
+        notifySocketDisconnected(socket.id);
+      }
+
       if (config.socketActivityBroadcaster && token) {
         socketDisconnecting({ token, socket, reason });
       } else {

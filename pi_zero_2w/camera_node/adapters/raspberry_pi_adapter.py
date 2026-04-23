@@ -6,6 +6,7 @@ import logging
 
 from camera_node.adapters.base import HardwareAdapter
 from camera_node.models import CameraState
+from camera_node.video_publisher import VideoPublisher
 
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._pan_servo = None
         self._tilt_servo = None
         self._recording_process: asyncio.subprocess.Process | None = None
+        self._video_publisher = VideoPublisher()
 
         self._state = CameraState(
             is_online=True,
@@ -98,6 +100,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 self._tilt_servo = None
 
     async def shutdown(self) -> None:
+        await self._video_publisher.stop()
         await self._stop_recording_process()
 
         self._close_servo(self._pan_servo)
@@ -162,6 +165,12 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         await self._stop_recording_process()
         self._state.recording = False
         self._state.mode = "live"
+
+    async def start_video_stream(self, *, rtp_host: str, rtp_port: int) -> None:
+        await self._video_publisher.start(rtp_host=rtp_host, rtp_port=rtp_port)
+
+    async def stop_video_stream(self) -> None:
+        await self._video_publisher.stop()
 
     async def _start_recording_process(self) -> None:
         if self._recording_process and self._recording_process.returncode is None:

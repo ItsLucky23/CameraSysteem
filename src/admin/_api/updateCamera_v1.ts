@@ -16,7 +16,6 @@ export interface ApiParams {
     slug: string;
     name: string;
     cameraIp: string;
-    streamUrl: string;
   };
   user: SessionLayout;
   functions: Functions;
@@ -30,9 +29,8 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   const slug = data.slug.trim().toLowerCase();
   const name = data.name.trim();
   const cameraIp = data.cameraIp.trim();
-  const streamUrl = data.streamUrl.trim();
 
-  if (!cameraId || !slug || !name || !cameraIp || !streamUrl) {
+  if (!cameraId || !slug || !name || !cameraIp) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -41,14 +39,6 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   }
 
   if (!ipv4Regex.test(cameraIp)) {
-    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
-  }
-
-  const [urlParseError, parsedUrl] = await tryCatch(() => {
-    return new URL(streamUrl);
-  });
-
-  if (urlParseError || !parsedUrl || (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:')) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -88,7 +78,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   const [ipCheckError, ipCamera] = await tryCatch(async () => {
     return functions.db.prisma.camera.findFirst({
       where: {
-        nodeId: cameraIp,
+        ip: cameraIp,
         NOT: { id: cameraId },
       },
       select: { id: true },
@@ -109,8 +99,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
       data: {
         slug,
         name,
-        nodeId: cameraIp,
-        streamUrl,
+        ip: cameraIp,
       },
     });
   });
@@ -125,8 +114,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
       id: updatedCamera.id,
       slug: updatedCamera.slug,
       name: updatedCamera.name,
-      cameraIp: updatedCamera.nodeId,
-      streamUrl: updatedCamera.streamUrl,
+      cameraIp: updatedCamera.ip,
       isOnline: updatedCamera.isOnline,
       mode: updatedCamera.mode,
       lastSeenAt: updatedCamera.lastSeenAt ? updatedCamera.lastSeenAt.toISOString() : null,

@@ -178,7 +178,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   const [cameraReadError, camera] = await tryCatch(async () => {
     return functions.db.prisma.camera.findFirst({
-      where: { nodeId: cameraIp },
+      where: { ip: cameraIp },
       orderBy: {
         updatedAt: 'desc',
       },

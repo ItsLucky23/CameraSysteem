@@ -14,7 +14,6 @@ interface CameraCatalogItem {
   slug: string;
   name: string;
   cameraIp: string;
-  streamUrl: string;
   isOnline: boolean;
   mode: 'off' | 'idle' | 'live' | 'record';
   lastSeenAt: string | null;
@@ -28,7 +27,6 @@ interface CameraViewModel {
   isOffline: boolean;
   uptime: string;
   latencyMs: number;
-  streamTier: string;
 }
 
 type CameraCatalogResponse =
@@ -132,12 +130,10 @@ export default function AdminPage() {
     slug: string;
     name: string;
     cameraIp: string;
-    streamUrl: string;
   }>({
     slug: '',
     name: '',
     cameraIp: '',
-    streamUrl: '',
   });
 
   const onlineCount = useMemo(() => {
@@ -206,9 +202,6 @@ export default function AdminPage() {
         : getDeterministicUptimeMs(camera.id);
 
       const isOffline = !camera.isOnline;
-      const streamTier = camera.streamUrl.toLowerCase().includes('high') || camera.streamUrl.toLowerCase().includes('1080')
-        ? '1080P'
-        : '4K';
 
       return {
         camera,
@@ -216,7 +209,6 @@ export default function AdminPage() {
         isOffline,
         uptime: isOffline ? '--' : formatDuration(uptimeMs),
         latencyMs: getDeterministicLatency(camera.id),
-        streamTier,
       };
     });
   }, [filteredCameraCatalog]);
@@ -284,10 +276,9 @@ export default function AdminPage() {
       slug: form.slug.trim().toLowerCase(),
       name: form.name.trim(),
       cameraIp: form.cameraIp.trim(),
-      streamUrl: form.streamUrl.trim(),
     };
 
-    if (!payload.slug || !payload.name || !payload.cameraIp || !payload.streamUrl) {
+    if (!payload.slug || !payload.name || !payload.cameraIp) {
       notify.error({ key: 'camera.invalidInput' });
       return;
     }
@@ -329,7 +320,7 @@ export default function AdminPage() {
     }
 
     setCameraCatalog((previous) => [parsedBody.camera, ...previous].sort((first, second) => first.name.localeCompare(second.name)));
-    setForm({ slug: '', name: '', cameraIp: '', streamUrl: '' });
+    setForm({ slug: '', name: '', cameraIp: '' });
     setPanelOpen(false);
     setSavingCamera(false);
     notify.success({ key: 'adminCameraManager.created' });
@@ -345,10 +336,9 @@ export default function AdminPage() {
       slug: form.slug.trim().toLowerCase(),
       name: form.name.trim(),
       cameraIp: form.cameraIp.trim(),
-      streamUrl: form.streamUrl.trim(),
     };
 
-    if (!payload.slug || !payload.name || !payload.cameraIp || !payload.streamUrl) {
+    if (!payload.slug || !payload.name || !payload.cameraIp) {
       notify.error({ key: 'camera.invalidInput' });
       return;
     }
@@ -448,7 +438,7 @@ export default function AdminPage() {
   const openCreatePanel = useCallback(() => {
     setPanelMode('create');
     setPanelCameraId(null);
-    setForm({ slug: '', name: '', cameraIp: '', streamUrl: '' });
+    setForm({ slug: '', name: '', cameraIp: '' });
     setDisableFeed(false);
     setPanelOpen(true);
   }, []);
@@ -460,7 +450,6 @@ export default function AdminPage() {
       slug: camera.slug,
       name: camera.name,
       cameraIp: camera.cameraIp,
-      streamUrl: camera.streamUrl,
     });
     setDisableFeed(!camera.isOnline);
     setPanelOpen(true);
@@ -567,7 +556,7 @@ export default function AdminPage() {
 
                       <div className="min-w-0 flex-1">
                         <div className="text-base font-bold text-title">{item.camera.name}</div>
-                        <div className="truncate text-xs font-medium text-common/80">{item.camera.streamUrl}</div>
+                        <div className="truncate font-mono text-xs font-medium text-common/80">{item.camera.cameraIp}</div>
                         <div className="mt-1 flex items-center gap-3 text-xs text-common/80">
                           <div className="flex items-center gap-1">
                             <Icon name={item.isOffline ? 'warning' : 'schedule'} size="13px" />
@@ -718,11 +707,8 @@ export default function AdminPage() {
                     <div className="min-w-0 flex-1">
                       <div className="mb-1 flex items-center gap-2">
                         <div className="truncate text-lg font-bold text-title">{item.camera.name}</div>
-                        <div className="rounded-md border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
-                          {item.streamTier}
-                        </div>
                       </div>
-                      <div className="truncate font-mono text-sm text-common/80">{item.camera.streamUrl}</div>
+                      <div className="truncate font-mono text-sm text-common/80">{item.camera.cameraIp}</div>
 
                       <div className="mt-2 flex items-center gap-4 text-xs text-common/80">
                         <div className="flex items-center gap-1">
@@ -849,21 +835,6 @@ export default function AdminPage() {
                       }}
                       placeholder={translate({ key: 'adminCameraManager.cameraIpPlaceholder' })}
                       value={form.cameraIp}
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold uppercase tracking-widest text-common/80">{translate({ key: 'adminCameraManager.streamUrl' })}</label>
-                  <div className="flex items-center gap-2 border-b-2 border-container2-border pb-2">
-                    <Icon name="videocam" size="18px" customClasses="text-common" />
-                    <input
-                      className="w-full border-none bg-transparent p-0 text-sm font-medium text-title outline-none"
-                      onChange={(event) => {
-                        setForm((previous) => ({ ...previous, streamUrl: event.target.value }));
-                      }}
-                      placeholder={translate({ key: 'adminCameraManager.streamUrlPlaceholder' })}
-                      value={form.streamUrl}
                     />
                   </div>
                 </div>

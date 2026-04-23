@@ -84,9 +84,8 @@ model Camera {
   id           String    @id @default(uuid()) @map("_id")
   slug         String    @unique
   name         String
-  streamKey    String    @unique
-  streamUrl    String
-  ip           String    @map("nodeId")
+  ip           String
+  enabled      Boolean   @default(true)
   isOnline     Boolean   @default(false)
   mode         CAMERA_MODE @default(idle)
   irMode       IR_MODE   @default(auto)

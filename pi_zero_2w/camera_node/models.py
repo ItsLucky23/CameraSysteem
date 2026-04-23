@@ -31,7 +31,7 @@ class CameraCommand:
     def from_api(cls, value: Mapping[str, Any]) -> "CameraCommand":
         command_id = str(value.get("commandId", "")).strip()
         camera_id = str(value.get("cameraId", "")).strip()
-        camera_ip = str(value.get("cameraIp", value.get("nodeId", ""))).strip()
+        camera_ip = str(value.get("cameraIp", "")).strip()
         action = str(value.get("action", "")).strip()
 
         payload_raw = value.get("payload")

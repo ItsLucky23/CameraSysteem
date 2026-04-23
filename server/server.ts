@@ -18,7 +18,6 @@ import allowedOrigin from './auth/checkOrigin';
 import config, { SessionLayout } from '../config';
 
 import { serveAvatar } from './utils/serveAvatars';
-import serveCameraMjpegStream from './utils/serveCameraMjpegStream';
 import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
@@ -240,25 +239,6 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     }
     return res.end();
 
-  } else if (routePath === '/camera/mjpeg/stream') {
-    if (method !== 'GET') {
-      res.setHeader('Content-Type', 'application/json');
-      res.writeHead(405);
-      return res.end(JSON.stringify({
-        status: 'error',
-        httpStatus: 405,
-        message: 'api.methodNotAllowed',
-        errorCode: 'api.methodNotAllowed',
-      }));
-    }
-
-    await serveCameraMjpegStream({
-      req,
-      res,
-      params: (params && typeof params === 'object') ? (params as Record<string, unknown>) : {},
-    });
-    return;
-
     //? HTTP API route - allows calling APIs via HTTP instead of WebSocket
     //? Supports: GET/POST/PUT/DELETE /api/{name}
   } else if (routePath.startsWith('/api/')) {
@@ -400,6 +380,11 @@ const port: string = process.env.SERVER_PORT || '80';
 
   const httpServer = http.createServer(async (req, res) => { ServerRequest(req, res) });
   loadSocket(httpServer);
+
+  // Clear any stale Pi Zero stream state left over from a previous Pi 5 instance.
+  const { broadcastStreamStopOnBoot } = await import('./utils/cameraStreamOrchestrator');
+  void broadcastStreamStopOnBoot();
+
   // @ts-ignore // typescript thinks ip needs to be a number
   httpServer.listen(port, ip, () => {
     console.log(`Server is running on http://${ip}:${port}/`, 'green');

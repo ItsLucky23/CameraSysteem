@@ -43,14 +43,7 @@ interface CameraState {
   updatedAt: string;
 }
 
-interface PreviewSession {
-  transport: 'webrtc';
-  streamKey: string;
-  token: string;
-  offerUrl: string;
-  expiresAt: string;
-  iceServers: RTCIceServer[];
-}
+const PREVIEW_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 type CommandAction = 'panLeft' | 'panRight' | 'tiltUp' | 'tiltDown' | 'irOn' | 'irOff' | 'recordStart' | 'recordStop';
 
@@ -74,6 +67,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const { upsertSyncEventCallback } = useSyncEvents();
 
   const previewPeerRef = useRef<RTCPeerConnection | null>(null);
+  const previewStartingRef = useRef<boolean>(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
 
@@ -92,7 +86,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const [cameras, setCameras] = useState<CameraListItem[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null);
   const [cameraState, setCameraState] = useState<CameraState | null>(null);
-  const [previewSession, setPreviewSession] = useState<PreviewSession | null>(null);
   const [lastCommandResult, setLastCommandResult] = useState<{
     commandId: string;
     action: string;
@@ -144,6 +137,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     stopPreviewConnection();
     stopPreviewStream();
     clearPreviewVideoElement();
+    previewStartingRef.current = false;
     setPreviewStarting(false);
     setPreviewActive(false);
     setPreviewStatusKey('cameras.previewStopped');
@@ -245,7 +239,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     if (!selectedCameraId) {
       stopPreview();
       setCameraState(null);
-      setPreviewSession(null);
       setPreviewErrorKey(null);
       setPreviewStatusKey('cameras.previewIdle');
       return;
@@ -353,7 +346,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
           stopPreview();
           setSelectedCameraId(null);
           setCameraState(null);
-          setPreviewSession(null);
         }
       },
     });
@@ -444,44 +436,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     }
   }, [selectedCameraId]);
 
-  const createPreviewSession = useCallback(async () => {
-    if (!selectedCameraId) {
-      return;
-    }
-
-    stopPreview();
-    setPreviewErrorKey(null);
-    setPreviewStatusKey('cameras.previewPreparing');
-
-    const response = await apiRequest({
-      name: 'cameras/getCameraPreviewSession',
-      version: 'v1',
-      data: {
-        cameraId: selectedCameraId,
-      },
-    });
-
-    if (response.status === 'success') {
-      setPreviewSession({
-        transport: response.transport,
-        streamKey: response.streamKey,
-        token: response.signaling.token,
-        offerUrl: response.signaling.offerUrl,
-        expiresAt: response.signaling.expiresAt,
-        iceServers: response.signaling.iceServers,
-      });
-      setPreviewStatusKey('cameras.previewReady');
-      return;
-    }
-
-    setPreviewStatusKey('cameras.previewFailed');
-    setPreviewErrorKey(response.errorCode);
-
-    notify.error({ key: response.errorCode });
-  }, [selectedCameraId, stopPreview]);
-
   const startPreview = useCallback(async () => {
-    if (!selectedCameraId || !previewSession) {
+    if (!selectedCameraId) {
       return;
     }
 
@@ -492,16 +448,27 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       return;
     }
 
+    // Ref guard: the effect that calls startPreview can re-fire before
+    // setPreviewStarting(true) commits, so without this we'd tear down and
+    // re-create the PeerConnection multiple times and the answer would land
+    // on a stale closed PC. Must be set AFTER stopPreview() because stopPreview
+    // resets the same ref.
+    if (previewStartingRef.current) {
+      return;
+    }
+
     stopPreview();
+    previewStartingRef.current = true;
     setPreviewStarting(true);
     setPreviewStatusKey('cameras.previewConnecting');
     setPreviewErrorKey(null);
 
     const [peerCreateError, peerConnection] = await tryCatch(() => {
-      return new RTCPeerConnection({ iceServers: previewSession.iceServers });
+      return new RTCPeerConnection({ iceServers: PREVIEW_ICE_SERVERS });
     });
 
     if (peerCreateError || !peerConnection) {
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewFailed');
       setPreviewErrorKey('camera.webrtcSignalingFailed');
@@ -510,6 +477,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     }
 
     previewPeerRef.current = peerConnection;
+
+    peerConnection.addTransceiver('video', { direction: 'recvonly' });
 
     peerConnection.ontrack = (event) => {
       const firstStream = event.streams[0];
@@ -520,6 +489,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       }
 
       setPreviewActive(true);
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewConnected');
     };
@@ -531,13 +501,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     };
 
     const [offerCreateError, offer] = await tryCatch(async () => {
-      return peerConnection.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
+      return peerConnection.createOffer();
     });
 
     if (offerCreateError || !offer) {
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewFailed');
       setPreviewErrorKey('camera.webrtcSignalingFailed');
@@ -551,6 +519,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     });
 
     if (localDescriptionError) {
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewFailed');
       setPreviewErrorKey('camera.webrtcSignalingFailed');
@@ -563,6 +532,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
     const offerSdp = peerConnection.localDescription?.sdp.trim();
     if (!offerSdp) {
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewFailed');
       setPreviewErrorKey('camera.webrtcSignalingFailed');
@@ -576,12 +546,12 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       version: 'v1',
       data: {
         cameraId: selectedCameraId,
-        previewToken: previewSession.token,
         offerSdp,
       },
     });
 
     if (offerResponse.status === 'error') {
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewFailed');
       setPreviewErrorKey(offerResponse.errorCode);
@@ -598,6 +568,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     });
 
     if (remoteDescriptionError) {
+      previewStartingRef.current = false;
       setPreviewStarting(false);
       setPreviewStatusKey('cameras.previewFailed');
       setPreviewErrorKey('camera.webrtcSignalingFailed');
@@ -616,10 +587,23 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       });
     }
 
-    setPreviewStarting(false);
+    previewStartingRef.current = false;
+      setPreviewStarting(false);
     setPreviewActive(true);
     setPreviewStatusKey('cameras.previewConnected');
-  }, [outputAudioEnabled, previewSession, selectedCameraId, stopPreview, waitForIceGathering]);
+  }, [outputAudioEnabled, selectedCameraId, stopPreview, waitForIceGathering]);
+
+  useEffect(() => {
+    if (!selectedCameraId || !selectedCamera?.canPreview) {
+      return;
+    }
+
+    if (previewActive || previewStarting) {
+      return;
+    }
+
+    void startPreview();
+  }, [selectedCameraId, selectedCamera?.canPreview, previewActive, previewStarting, startPreview]);
 
   useEffect(() => {
     if (!cameraState?.recording) {
@@ -736,7 +720,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   }, [outputAudioEnabled, previewActive]);
 
   const controlsDisabled = busyAction !== null || !selectedCamera?.canControl;
-  const startPreviewDisabled = previewStarting || !previewSession || !selectedCamera?.canPreview;
 
   const qualityLabel = useMemo(() => {
     if (!selectedCamera) {
@@ -758,22 +741,18 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     return '4K';
   }, [cameraState?.mode, previewActive, selectedCamera]);
 
-  const fpsLabel = previewActive ? '60FPS' : '0FPS';
+  const fpsLabel = previewActive ? '45FPS' : '0FPS';
   const zoomLabel = `${(1 + (zoomLevel / 30)).toFixed(1)}X`;
   const recordingActive = Boolean(cameraState?.recording);
   const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';
 
   const previewActionLabel = useMemo(() => {
-    if (!previewSession) {
-      return translate({ key: 'cameras.requestPreviewSession' });
+    if (previewActive || previewStarting) {
+      return translate({ key: 'cameras.stopPreview' });
     }
 
-    if (!previewActive) {
-      return translate({ key: 'cameras.startPreview' });
-    }
-
-    return translate({ key: 'cameras.stopPreview' });
-  }, [previewActive, previewSession, translate]);
+    return translate({ key: 'cameras.startPreview' });
+  }, [previewActive, previewStarting, translate]);
 
   const temperatureLabel = useMemo(() => {
     if (cameraState?.temperatureC === null || cameraState?.temperatureC === undefined) {
@@ -784,18 +763,13 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   }, [cameraState?.temperatureC, translate]);
 
   const handlePreviewAction = useCallback(() => {
-    if (!previewSession) {
-      void createPreviewSession();
+    if (previewActive || previewStarting) {
+      stopPreview();
       return;
     }
 
-    if (!previewActive) {
-      void startPreview();
-      return;
-    }
-
-    stopPreview();
-  }, [createPreviewSession, previewActive, previewSession, startPreview, stopPreview]);
+    void startPreview();
+  }, [previewActive, previewStarting, startPreview, stopPreview]);
 
   const renderPtzPad = useCallback((sizeClassName: string) => {
     return (
@@ -1031,27 +1005,14 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
               <div className={`flex flex-col gap-4`}>
                 {renderPreviewPanel(false)}
 
-                <div className={`grid grid-cols-1 gap-2 sm:grid-cols-3`}>
+                <div className={`grid grid-cols-1 gap-2 sm:grid-cols-2`}>
                   <button
-                    className={`rounded-xl border border-container2-border bg-container2 px-4 py-2 text-xs font-bold text-title disabled:opacity-60`}
+                    className={`rounded-xl border px-4 py-2 text-xs font-bold ${(previewActive || previewStarting) ? 'border-container2-border bg-container2 text-title' : 'border-primary-border bg-primary text-title-primary'} disabled:opacity-60`}
                     disabled={!selectedCamera.canPreview}
-                    onClick={() => {
-                      void createPreviewSession();
-                    }}
+                    onClick={handlePreviewAction}
                     type="button"
                   >
-                    {translate({ key: 'cameras.requestPreviewSession' })}
-                  </button>
-
-                  <button
-                    className={`rounded-xl border border-primary-border bg-primary px-4 py-2 text-xs font-bold text-title-primary disabled:opacity-60`}
-                    disabled={startPreviewDisabled}
-                    onClick={() => {
-                      void startPreview();
-                    }}
-                    type="button"
-                  >
-                    {translate({ key: 'cameras.startPreview' })}
+                    {previewActionLabel}
                   </button>
 
                   <button
@@ -1217,36 +1178,27 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                 <div className={`rounded-3xl border border-container2-border bg-container1 p-4 flex flex-col gap-3 min-h-[34rem]`}>
                   {renderPreviewPanel(true)}
 
-                  <div className={`grid grid-cols-3 gap-2`}>
+                  <div className={`grid grid-cols-2 gap-2`}>
                     <button
-                      className={`rounded-xl border border-container2-border bg-container2 px-4 py-2 text-xs font-bold text-title disabled:opacity-60`}
+                      className={`rounded-xl border px-4 py-2 text-xs font-bold ${(previewActive || previewStarting) ? 'border-container2-border bg-container2 text-title' : 'border-primary-border bg-primary text-title-primary'} disabled:opacity-60`}
                       disabled={!selectedCamera.canPreview}
-                      onClick={() => {
-                        void createPreviewSession();
-                      }}
+                      onClick={handlePreviewAction}
                       type="button"
                     >
-                      {translate({ key: 'cameras.requestPreviewSession' })}
+                      {previewActionLabel}
                     </button>
 
                     <button
-                      className={`rounded-xl border border-primary-border bg-primary px-4 py-2 text-xs font-bold text-title-primary disabled:opacity-60`}
-                      disabled={startPreviewDisabled}
+                      className={`rounded-xl border px-4 py-2 text-xs font-bold ${recordingActive ? 'border-wrong/35 bg-wrong/15 text-wrong' : 'border-container2-border bg-container2 text-title'} disabled:opacity-60`}
+                      disabled={controlsDisabled}
                       onClick={() => {
-                        void startPreview();
+                        void setRecording(!recordingActive);
                       }}
                       type="button"
                     >
-                      {translate({ key: 'cameras.startPreview' })}
-                    </button>
-
-                    <button
-                      className={`rounded-xl border border-container2-border bg-container2 px-4 py-2 text-xs font-bold text-title disabled:opacity-60`}
-                      disabled={!previewActive && !previewStarting}
-                      onClick={stopPreview}
-                      type="button"
-                    >
-                      {translate({ key: 'cameras.stopPreview' })}
+                      {recordingActive
+                        ? translate({ key: 'cameras.recordStop' })
+                        : translate({ key: 'cameras.recordStart' })}
                     </button>
                   </div>
 
