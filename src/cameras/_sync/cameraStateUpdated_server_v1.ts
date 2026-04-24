@@ -21,6 +21,10 @@ export interface SyncParams {
       recording?: boolean;
       measuredFps?: number | null;
       lastFrameAgeMs?: number | null;
+      // Admin-configured stream params. Broadcast from updateCamera_v1 so the
+      // cameras page reflects new quality/fps labels without a page reload.
+      targetFps?: number;
+      quality?: 'low' | 'medium' | 'high';
     };
     at: string;
   };

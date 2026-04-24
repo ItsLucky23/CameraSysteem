@@ -57,6 +57,12 @@ class VideoPublisher:
                 bitrate_bps,
             )
             await self.stop()
+        else:
+            # If a previous Python run exited without cleanup, rpicam-vid / ffmpeg
+            # can still be holding the camera device as orphan processes (PPID=1).
+            # A fresh rpicam-vid then fails with "Camera is already in use" and the
+            # drain task exits with 0 progress lines. Sweep them before spawning.
+            await self._kill_orphan_pipelines()
 
         cmd = self._build_pipeline_command(
             rtp_host=rtp_host,
@@ -123,6 +129,32 @@ class VideoPublisher:
 
         age_ms = int(max(0.0, (time.monotonic() - self._last_frame_at) * 1000))
         return self._measured_fps, age_ms
+
+    @staticmethod
+    async def _kill_orphan_pipelines() -> None:
+        # Scoped to the two binaries we spawn. `pkill -f` matches the full command
+        # line. Never blocks startup on failure — this is best-effort self-heal.
+        patterns = ("rpicam-vid", "ffmpeg.*rtp")
+        for pattern in patterns:
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    "pkill",
+                    "-f",
+                    pattern,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                return_code = await process.wait()
+                if return_code == 0:
+                    logger.info("VideoPublisher killed orphan process matching '%s'", pattern)
+            except FileNotFoundError:
+                return
+            except Exception as error:  # noqa: BLE001
+                logger.warning("VideoPublisher orphan sweep failed for '%s': %s", pattern, error)
+                return
+
+        # Let the kernel release the camera device before the next rpicam-vid binds it.
+        await asyncio.sleep(0.3)
 
     @staticmethod
     def _build_pipeline_command(

@@ -35,6 +35,10 @@ interface CameraIngest {
   rtpPort: number;
   socket: Socket;
   peers: Set<ForwardPeer>;
+  // Updated on every received RTP packet so the orchestrator can detect Pi
+  // Zero pipeline death (reboot, ffmpeg crash, network blip) and re-send
+  // startVideoStream without requiring a manual Pi 5 restart.
+  lastPacketAt: number | null;
 }
 
 // Hoisted onto globalThis so that ESM-imported (socket.ts → orchestrator) and
@@ -135,6 +139,7 @@ const attachRtpForwarder = (ingest: CameraIngest): void => {
 
   ingest.socket.on('message', (msg: Buffer) => {
     packetsReceived += 1;
+    ingest.lastPacketAt = Date.now();
     if (packetsReceived === 1) {
       console.log(
         `cameraWebrtcBridge[${ingest.cameraId}] first RTP packet received on port ${String(ingest.rtpPort)} (size=${String(msg.length)})`,
@@ -187,6 +192,11 @@ export const getCameraIngestRtpPort = (cameraId: string): number | null => {
   return ingest ? ingest.rtpPort : null;
 };
 
+export const getCameraIngestLastPacketAt = (cameraId: string): number | null => {
+  const ingest = ingestByCameraId.get(cameraId);
+  return ingest ? ingest.lastPacketAt : null;
+};
+
 export const startCameraIngest = ({
   cameraId,
 }: {
@@ -205,6 +215,7 @@ export const startCameraIngest = ({
     rtpPort,
     socket,
     peers: new Set(),
+    lastPacketAt: null,
   };
 
   attachRtpForwarder(ingest);

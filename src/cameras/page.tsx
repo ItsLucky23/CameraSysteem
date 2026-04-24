@@ -308,6 +308,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
               ...(typeof serverOutput.patch.isOnline === 'boolean' ? { isOnline: serverOutput.patch.isOnline } : {}),
               ...(serverOutput.patch.mode === undefined ? {} : { mode: serverOutput.patch.mode }),
               ...(serverOutput.patch.irMode === undefined ? {} : { irMode: serverOutput.patch.irMode }),
+              ...(serverOutput.patch.targetFps === undefined ? {} : { targetFps: serverOutput.patch.targetFps }),
+              ...(serverOutput.patch.quality === undefined ? {} : { quality: serverOutput.patch.quality }),
             };
           });
         });

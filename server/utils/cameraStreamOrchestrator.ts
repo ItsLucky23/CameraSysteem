@@ -5,6 +5,7 @@ import { enqueueCommand } from '../functions/cameraNode';
 import { tryCatch } from '../functions/tryCatch';
 
 import {
+  getCameraIngestLastPacketAt,
   getCameraIngestRtpPort,
   isCameraIngestRunning,
   startCameraIngest,
@@ -13,10 +14,46 @@ import {
 
 const SYSTEM_USER_ID = '__system__';
 
-const connectedSocketIds = new Set<string>();
+// Same reason as cameraWebrtcBridge: dev hot-reload swaps this module while
+// Pi 5 stays up, so the socket/activation bookkeeping has to live on
+// globalThis or a reload would wipe the state that the still-connected client
+// and still-streaming Pi Zero depend on.
+interface OrchestratorSingletonState {
+  connectedSocketIds: Set<string>;
+  activatedCameraIds: Set<string>;
+  reconcileTimer: ReturnType<typeof globalThis.setInterval> | null;
+  cameraIpById: Map<string, string>;
+}
 
+const ORCHESTRATOR_SINGLETON_KEY = '__luckyStackCameraStreamOrchestratorState__';
+
+const orchestratorScope = globalThis as typeof globalThis & {
+  [ORCHESTRATOR_SINGLETON_KEY]?: OrchestratorSingletonState;
+};
+
+const orchestratorState: OrchestratorSingletonState = orchestratorScope[ORCHESTRATOR_SINGLETON_KEY] ?? {
+  connectedSocketIds: new Set<string>(),
+  activatedCameraIds: new Set<string>(),
+  reconcileTimer: null,
+  cameraIpById: new Map<string, string>(),
+};
+
+if (!orchestratorScope[ORCHESTRATOR_SINGLETON_KEY]) {
+  orchestratorScope[ORCHESTRATOR_SINGLETON_KEY] = orchestratorState;
+}
+
+const connectedSocketIds = orchestratorState.connectedSocketIds;
 // Per-camera activation state so we never double-start the Pi Zero stream.
-const activatedCameraIds = new Set<string>();
+const activatedCameraIds = orchestratorState.activatedCameraIds;
+// Remembers the IP each activated camera was started with, so the reconciler
+// can re-enqueue startVideoStream without another DB lookup.
+const cameraIpById = orchestratorState.cameraIpById;
+
+// If ingest hasn't received an RTP packet in this many ms while the camera is
+// supposed to be active, assume the Pi Zero pipeline died (reboot, crash) and
+// re-issue startVideoStream.
+const STREAM_STALL_THRESHOLD_MS = 8000;
+const RECONCILE_INTERVAL_MS = 4000;
 
 // Quality -> bitrate (bits per second). rpicam-vid --bitrate takes bps.
 const qualityBitrateBps: Record<string, number> = {
@@ -131,6 +168,8 @@ const activateCamera = async ({
   }
 
   activatedCameraIds.add(cameraId);
+  cameraIpById.set(cameraId, cameraIp);
+  ensureReconciler();
 };
 
 const deactivateCamera = async ({
@@ -141,6 +180,7 @@ const deactivateCamera = async ({
   cameraIp: string;
 }): Promise<void> => {
   activatedCameraIds.delete(cameraId);
+  cameraIpById.delete(cameraId);
 
   await tryCatch(async () => {
     return enqueueCommand({
@@ -154,6 +194,58 @@ const deactivateCamera = async ({
   });
 
   stopCameraIngest({ cameraId });
+};
+
+// Self-healing: every RECONCILE_INTERVAL_MS, check each activated camera's
+// ingest for RTP liveness. If no packet has arrived in STREAM_STALL_THRESHOLD_MS
+// (Pi Zero rebooted, ffmpeg crashed, etc.), re-issue startVideoStream so the
+// user doesn't have to manually bounce the Pi 5 when the Pi Zero restarts.
+const reconcileActiveStreams = async (): Promise<void> => {
+  if (activatedCameraIds.size === 0) {
+    return;
+  }
+
+  const now = Date.now();
+  const stale: string[] = [];
+
+  for (const cameraId of activatedCameraIds) {
+    const lastPacketAt = getCameraIngestLastPacketAt(cameraId);
+    // lastPacketAt null means activation just happened and no packet has arrived
+    // yet — give it a grace window starting from "now - threshold" so we don't
+    // spam re-enqueues right after first start.
+    if (lastPacketAt === null) continue;
+    if (now - lastPacketAt > STREAM_STALL_THRESHOLD_MS) {
+      stale.push(cameraId);
+    }
+  }
+
+  if (stale.length === 0) {
+    return;
+  }
+
+  for (const cameraId of stale) {
+    const cameraIp = cameraIpById.get(cameraId);
+    if (!cameraIp) {
+      continue;
+    }
+    console.warn(
+      `cameraStreamOrchestrator: stream stalled for ${cameraId} (>${String(STREAM_STALL_THRESHOLD_MS)}ms with no RTP) — re-issuing startVideoStream`,
+    );
+    // Drop + re-activate so fetchCameraStreamConfig runs with fresh DB values.
+    // eslint-disable-next-line no-await-in-loop
+    await deactivateCamera({ cameraId, cameraIp });
+    // eslint-disable-next-line no-await-in-loop
+    await activateCamera({ cameraId, cameraIp });
+  }
+};
+
+const ensureReconciler = (): void => {
+  if (orchestratorState.reconcileTimer !== null) {
+    return;
+  }
+  orchestratorState.reconcileTimer = globalThis.setInterval(() => {
+    void reconcileActiveStreams();
+  }, RECONCILE_INTERVAL_MS);
 };
 
 const activateAllEnabledCameras = async (): Promise<void> => {

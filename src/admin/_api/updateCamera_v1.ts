@@ -2,6 +2,7 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
 import { onCameraStreamConfigChanged } from '../../../server/utils/cameraStreamOrchestrator';
+import { emitCameraSyncEvent, getCameraRoomCode } from '../../../server/utils/cameraHelpers';
 
 export const rateLimit: number | false = 30;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'PUT';
@@ -131,6 +132,23 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   if (streamConfigChanged) {
     void onCameraStreamConfigChanged({ cameraId, cameraIp });
+
+    // Broadcast the new target fps / quality so anyone already on the cameras
+    // page sees the labels update live. Pi Zero's real measuredFps follows
+    // ~5s later via the regular telemetry broadcast.
+    emitCameraSyncEvent({
+      fullName: 'sync/cameras/cameraStateUpdated/v1',
+      receiver: getCameraRoomCode(cameraId),
+      serverOutput: {
+        status: 'success',
+        cameraId,
+        patch: {
+          targetFps,
+          quality,
+        },
+        at: new Date().toISOString(),
+      },
+    });
   }
 
   return {
