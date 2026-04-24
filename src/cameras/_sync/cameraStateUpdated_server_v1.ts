@@ -19,6 +19,8 @@ export interface SyncParams {
       temperatureC?: number | null;
       motionDetected?: boolean;
       recording?: boolean;
+      measuredFps?: number | null;
+      lastFrameAgeMs?: number | null;
     };
     at: string;
   };

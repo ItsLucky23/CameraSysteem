@@ -317,14 +317,19 @@ export const createCameraWebrtcAnswer = async ({
 
   await waitForIceGathering(peerConnection);
 
-  const answerSdp = peerConnection.localDescription?.sdp.trim();
-  if (!answerSdp) {
+  const rawAnswerSdp = peerConnection.localDescription?.sdp;
+  if (!rawAnswerSdp) {
     console.error(
       `cameraWebrtcBridge[${cameraId}] localDescription sdp missing after ICE gathering`,
     );
     closeConnection();
     return { status: 'error', errorCode: 'camera.webrtcSignalingFailed' };
   }
+
+  // Chrome's SDP parser requires every line (including the last) to end with \r\n.
+  // werift omits the final terminator, so we normalize here. .trim() would make
+  // things worse — that's what caused the "Invalid SDP line" rejection.
+  const answerSdp = rawAnswerSdp.endsWith('\r\n') ? rawAnswerSdp : `${rawAnswerSdp}\r\n`;
 
   return {
     status: 'success',

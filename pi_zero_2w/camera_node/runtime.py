@@ -40,6 +40,8 @@ class CameraNodeRuntime:
 
         try:
             async with self._api_client:
+                # Best-effort first ping; if Pi 5 is down we still enter the poll loop
+                # and keep retrying instead of crashing the process.
                 await self._send_telemetry(command_result=None)
 
                 while self._running:

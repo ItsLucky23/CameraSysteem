@@ -80,6 +80,8 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       temperatureC: camera.temperatureC ?? null,
       recording: latestSnapshot?.recording ?? camera.mode === 'record',
       motionDetected: latestSnapshot?.motionDetected ?? false,
+      measuredFps: null,
+      lastFrameAgeMs: null,
       updatedAt: camera.updatedAt.toISOString(),
     },
   };

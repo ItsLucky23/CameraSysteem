@@ -9,6 +9,8 @@ import tryCatch from 'shared/tryCatch';
 
 export const template = 'ops';
 
+type Quality = 'low' | 'medium' | 'high';
+
 interface CameraCatalogItem {
   id: string;
   slug: string;
@@ -16,6 +18,8 @@ interface CameraCatalogItem {
   cameraIp: string;
   isOnline: boolean;
   mode: 'off' | 'idle' | 'live' | 'record';
+  targetFps: number;
+  quality: Quality;
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -130,11 +134,27 @@ export default function AdminPage() {
     slug: string;
     name: string;
     cameraIp: string;
+    targetFps: number;
+    quality: Quality;
   }>({
     slug: '',
     name: '',
     cameraIp: '',
+    targetFps: 15,
+    quality: 'medium',
   });
+
+  const qualityItems = useMemo(() => {
+    return [
+      { id: 'low', value: 'low', item: translate({ key: 'adminCameraManager.qualityLow' }) },
+      { id: 'medium', value: 'medium', item: translate({ key: 'adminCameraManager.qualityMedium' }) },
+      { id: 'high', value: 'high', item: translate({ key: 'adminCameraManager.qualityHigh' }) },
+    ];
+  }, [translate]);
+
+  const selectedQualityItem = useMemo(() => {
+    return qualityItems.find((item) => item.value === form.quality) ?? qualityItems[1];
+  }, [qualityItems, form.quality]);
 
   const onlineCount = useMemo(() => {
     return cameraCatalog.filter((camera) => camera.isOnline).length;
@@ -276,6 +296,8 @@ export default function AdminPage() {
       slug: form.slug.trim().toLowerCase(),
       name: form.name.trim(),
       cameraIp: form.cameraIp.trim(),
+      targetFps: form.targetFps,
+      quality: form.quality,
     };
 
     if (!payload.slug || !payload.name || !payload.cameraIp) {
@@ -320,7 +342,7 @@ export default function AdminPage() {
     }
 
     setCameraCatalog((previous) => [parsedBody.camera, ...previous].sort((first, second) => first.name.localeCompare(second.name)));
-    setForm({ slug: '', name: '', cameraIp: '' });
+    setForm({ slug: '', name: '', cameraIp: '', targetFps: 15, quality: 'medium' });
     setPanelOpen(false);
     setSavingCamera(false);
     notify.success({ key: 'adminCameraManager.created' });
@@ -336,6 +358,8 @@ export default function AdminPage() {
       slug: form.slug.trim().toLowerCase(),
       name: form.name.trim(),
       cameraIp: form.cameraIp.trim(),
+      targetFps: form.targetFps,
+      quality: form.quality,
     };
 
     if (!payload.slug || !payload.name || !payload.cameraIp) {
@@ -438,7 +462,7 @@ export default function AdminPage() {
   const openCreatePanel = useCallback(() => {
     setPanelMode('create');
     setPanelCameraId(null);
-    setForm({ slug: '', name: '', cameraIp: '' });
+    setForm({ slug: '', name: '', cameraIp: '', targetFps: 15, quality: 'medium' });
     setDisableFeed(false);
     setPanelOpen(true);
   }, []);
@@ -450,6 +474,8 @@ export default function AdminPage() {
       slug: camera.slug,
       name: camera.name,
       cameraIp: camera.cameraIp,
+      targetFps: camera.targetFps,
+      quality: camera.quality,
     });
     setDisableFeed(!camera.isOnline);
     setPanelOpen(true);
@@ -835,6 +861,41 @@ export default function AdminPage() {
                       }}
                       placeholder={translate({ key: 'adminCameraManager.cameraIpPlaceholder' })}
                       value={form.cameraIp}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-widest text-common/80">{translate({ key: 'adminCameraManager.targetFps' })}</label>
+                    <div className="flex items-center gap-2 border-b-2 border-container2-border pb-2">
+                      <Icon name="speed" size="18px" customClasses="text-common" />
+                      <input
+                        className="w-full border-none bg-transparent p-0 text-sm font-medium text-title outline-none"
+                        inputMode="numeric"
+                        max={60}
+                        min={1}
+                        onChange={(event) => {
+                          const parsed = Number.parseInt(event.target.value, 10);
+                          setForm((previous) => ({
+                            ...previous,
+                            targetFps: Number.isFinite(parsed) ? parsed : previous.targetFps,
+                          }));
+                        }}
+                        type="number"
+                        value={String(form.targetFps)}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase tracking-widest text-common/80">{translate({ key: 'adminCameraManager.quality' })}</label>
+                    <Dropdown
+                      items={qualityItems}
+                      onChange={(item) => {
+                        setForm((previous) => ({ ...previous, quality: item.value as Quality }));
+                      }}
+                      value={selectedQualityItem}
                     />
                   </div>
                 </div>

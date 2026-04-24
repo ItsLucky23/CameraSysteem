@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -87,23 +88,36 @@ class Pi5ApiClient:
 
         # LuckyStack HTTP APIs already treat the parsed JSON body as the API `data` payload.
         # Sending {"data": ...} adds an extra nesting level and fails runtime type validation.
-        async with self._session.post(url, json=data) as response:
-            status_code = response.status
-            try:
-                body = await response.json(content_type=None)
-            except Exception as error:  # noqa: BLE001
-                raise Pi5ApiError(f"Pi5 returned non-JSON response ({status_code}): {error}") from error
+        # Connection/timeout errors are wrapped so the runtime's Pi5ApiError handlers catch
+        # them uniformly and the node keeps retrying instead of crashing.
+        try:
+            async with self._session.post(url, json=data) as response:
+                status_code = response.status
+                try:
+                    body = await response.json(content_type=None)
+                except Exception as error:  # noqa: BLE001
+                    raise Pi5ApiError(f"Pi5 returned non-JSON response ({status_code}): {error}") from error
 
-            if not isinstance(body, dict):
-                raise Pi5ApiError(f"Pi5 returned invalid response type ({status_code})")
+                if not isinstance(body, dict):
+                    raise Pi5ApiError(f"Pi5 returned invalid response type ({status_code})")
 
-            if body.get("status") == "error":
-                error_code = body.get("errorCode") if isinstance(body.get("errorCode"), str) else None
-                message = error_code or "Pi5 API error"
-                raise Pi5ApiError(message, error_code=error_code, http_status=status_code)
+                if body.get("status") == "error":
+                    error_code = body.get("errorCode") if isinstance(body.get("errorCode"), str) else None
+                    message = error_code or "Pi5 API error"
+                    raise Pi5ApiError(message, error_code=error_code, http_status=status_code)
 
-            if body.get("status") != "success":
-                raise Pi5ApiError(f"Pi5 returned unknown status ({status_code})")
+                if body.get("status") != "success":
+                    raise Pi5ApiError(f"Pi5 returned unknown status ({status_code})")
 
-            logger.debug("Pi5 API success: %s", endpoint)
-            return body
+                logger.debug("Pi5 API success: %s", endpoint)
+                return body
+        except Pi5ApiError:
+            raise
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError as error:
+            raise Pi5ApiError(f"Pi5 request timed out: {endpoint}", error_code="camera.pi5Unreachable") from error
+        except aiohttp.ClientError as error:
+            raise Pi5ApiError(f"Pi5 connection failed: {error}", error_code="camera.pi5Unreachable") from error
+        except OSError as error:
+            raise Pi5ApiError(f"Pi5 network error: {error}", error_code="camera.pi5Unreachable") from error

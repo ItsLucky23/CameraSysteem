@@ -116,6 +116,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             self._ir_device = None
 
     async def get_state(self) -> CameraState:
+        measured_fps, last_frame_age_ms = self._video_publisher.get_stats()
         return CameraState(
             is_online=self._state.is_online,
             mode=self._state.mode,
@@ -126,6 +127,8 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             temperature_c=self._state.temperature_c,
             motion_detected=self._state.motion_detected,
             recording=self._state.recording,
+            measured_fps=measured_fps,
+            last_frame_age_ms=last_frame_age_ms,
         )
 
     async def pan(self, delta: int) -> None:
@@ -166,8 +169,20 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._state.recording = False
         self._state.mode = "live"
 
-    async def start_video_stream(self, *, rtp_host: str, rtp_port: int) -> None:
-        await self._video_publisher.start(rtp_host=rtp_host, rtp_port=rtp_port)
+    async def start_video_stream(
+        self,
+        *,
+        rtp_host: str,
+        rtp_port: int,
+        target_fps: int,
+        bitrate_bps: int,
+    ) -> None:
+        await self._video_publisher.start(
+            rtp_host=rtp_host,
+            rtp_port=rtp_port,
+            target_fps=target_fps,
+            bitrate_bps=bitrate_bps,
+        )
 
     async def stop_video_stream(self) -> None:
         await self._video_publisher.stop()

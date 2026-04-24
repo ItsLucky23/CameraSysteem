@@ -92,6 +92,8 @@ model Camera {
   irEnabled    Boolean   @default(false)
   pan          Int       @default(0)
   tilt         Int       @default(0)
+  targetFps    Int       @default(15)
+  quality      QUALITY   @default(medium)
   temperatureC Float?
   lastSeenAt   DateTime?
   createdAt    DateTime  @default(now())
@@ -195,6 +197,12 @@ enum IR_MODE {
   off
   on
   auto
+}
+
+enum QUALITY {
+  low
+  medium
+  high
 }
 
 enum CAMERA_ACTION {

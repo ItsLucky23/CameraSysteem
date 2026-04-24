@@ -18,9 +18,41 @@ const connectedSocketIds = new Set<string>();
 // Per-camera activation state so we never double-start the Pi Zero stream.
 const activatedCameraIds = new Set<string>();
 
+// Quality -> bitrate (bits per second). rpicam-vid --bitrate takes bps.
+const qualityBitrateBps: Record<string, number> = {
+  low: 1_000_000,
+  medium: 2_000_000,
+  high: 4_000_000,
+};
+
+const resolveBitrateBps = (quality: string | null | undefined): number => {
+  if (!quality) return qualityBitrateBps.medium;
+  return qualityBitrateBps[quality] ?? qualityBitrateBps.medium;
+};
+
 const getPi5LanIp = (): string | null => {
   const value = process.env.PI5_LAN_IP?.trim();
   return value && value.length > 0 ? value : null;
+};
+
+const fetchCameraStreamConfig = async (
+  cameraId: string,
+): Promise<{ targetFps: number; bitrateBps: number } | null> => {
+  const [fetchError, camera] = await tryCatch(async () => {
+    return prisma.camera.findUnique({
+      where: { id: cameraId },
+      select: { targetFps: true, quality: true },
+    });
+  });
+
+  if (fetchError || !camera) {
+    return null;
+  }
+
+  return {
+    targetFps: camera.targetFps,
+    bitrateBps: resolveBitrateBps(camera.quality),
+  };
 };
 
 const activateCamera = async ({
@@ -44,6 +76,12 @@ const activateCamera = async ({
     return;
   }
 
+  const streamConfig = await fetchCameraStreamConfig(cameraId);
+  if (!streamConfig) {
+    console.error(`cameraStreamOrchestrator: failed to fetch stream config for ${cameraId}`);
+    return;
+  }
+
   const [ingestError, ingestResult] = await tryCatch(() => {
     if (isCameraIngestRunning(cameraId)) {
       const port = getCameraIngestRtpPort(cameraId);
@@ -60,9 +98,11 @@ const activateCamera = async ({
   const startPayload = {
     rtpHost: pi5LanIp,
     rtpPort: ingestResult.rtpPort,
+    targetFps: streamConfig.targetFps,
+    bitrateBps: streamConfig.bitrateBps,
   };
   console.log(
-    `cameraStreamOrchestrator: enqueue startVideoStream for ${cameraId} payload=${JSON.stringify(startPayload)} (rtpPort type=${typeof startPayload.rtpPort})`,
+    `cameraStreamOrchestrator: enqueue startVideoStream for ${cameraId} payload=${JSON.stringify(startPayload)}`,
   );
 
   const [enqueueError] = await tryCatch(async () => {
@@ -219,4 +259,21 @@ export const onCameraEnabledChanged = async ({
   if (!enabled) {
     await deactivateCamera({ cameraId, cameraIp });
   }
+};
+
+// Called when admin edits fps/quality for a camera that is actively streaming.
+// The Pi Zero pipeline params are baked in at start time, so a restart is required.
+export const onCameraStreamConfigChanged = async ({
+  cameraId,
+  cameraIp,
+}: {
+  cameraId: string;
+  cameraIp: string;
+}): Promise<void> => {
+  if (!activatedCameraIds.has(cameraId)) {
+    return;
+  }
+
+  await deactivateCamera({ cameraId, cameraIp });
+  await activateCamera({ cameraId, cameraIp });
 };

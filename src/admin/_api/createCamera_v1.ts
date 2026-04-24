@@ -10,11 +10,15 @@ export const auth: AuthProps = {
   additional: [{ key: 'admin', value: true }],
 };
 
+type Quality = 'low' | 'medium' | 'high';
+
 export interface ApiParams {
   data: {
     slug: string;
     name: string;
     cameraIp: string;
+    targetFps?: number;
+    quality?: Quality;
   };
   user: SessionLayout;
   functions: Functions;
@@ -22,11 +26,14 @@ export interface ApiParams {
 
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const qualityValues: Quality[] = ['low', 'medium', 'high'];
 
 export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
   const slug = data.slug.trim().toLowerCase();
   const name = data.name.trim();
   const cameraIp = data.cameraIp.trim();
+  const targetFps = data.targetFps ?? 15;
+  const quality: Quality = data.quality ?? 'medium';
 
   if (!slug || !name || !cameraIp) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
@@ -37,6 +44,14 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   }
 
   if (!ipv4Regex.test(cameraIp)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (!Number.isInteger(targetFps) || targetFps < 1 || targetFps > 60) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (!qualityValues.includes(quality)) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -76,6 +91,8 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
         slug,
         name,
         ip: cameraIp,
+        targetFps,
+        quality,
       },
     });
   });
@@ -93,6 +110,8 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
       cameraIp: createdCamera.ip,
       isOnline: createdCamera.isOnline,
       mode: createdCamera.mode,
+      targetFps: createdCamera.targetFps,
+      quality: createdCamera.quality,
       lastSeenAt: createdCamera.lastSeenAt ? createdCamera.lastSeenAt.toISOString() : null,
       createdAt: createdCamera.createdAt.toISOString(),
       updatedAt: createdCamera.updatedAt.toISOString(),

@@ -72,9 +72,22 @@ class MockHardwareAdapter(HardwareAdapter):
         self._state.recording = recording
         self._state.mode = "record" if recording else "live"
 
-    async def start_video_stream(self, *, rtp_host: str, rtp_port: int) -> None:
+    async def start_video_stream(
+        self,
+        *,
+        rtp_host: str,
+        rtp_port: int,
+        target_fps: int,
+        bitrate_bps: int,
+    ) -> None:
         await asyncio.sleep(0)
-        logger.info("MockHardwareAdapter: pretending to start RTP stream to %s:%s", rtp_host, rtp_port)
+        logger.info(
+            "MockHardwareAdapter: pretending to start RTP stream to %s:%s (fps=%s bitrate=%s bps)",
+            rtp_host,
+            rtp_port,
+            target_fps,
+            bitrate_bps,
+        )
 
     async def stop_video_stream(self) -> None:
         await asyncio.sleep(0)

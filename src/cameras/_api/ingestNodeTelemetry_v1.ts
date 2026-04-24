@@ -29,6 +29,8 @@ export interface ApiParams {
     temperatureC?: number | null;
     motionDetected?: boolean;
     recording?: boolean;
+    measuredFps?: number | null;
+    lastFrameAgeMs?: number | null;
     commandResult?: {
       commandId: string;
       action: string;
@@ -52,11 +54,7 @@ const isCommandResultStatus = (value: unknown): value is CommandResultStatus => 
   return value === 'executed' || value === 'failed' || value === 'rejected';
 };
 
-const buildCameraPatch = ({
-  data,
-}: {
-  data: ApiParams['data'];
-}): {
+interface CameraStatePatch {
   mode?: CameraMode;
   irMode?: IRMode;
   irEnabled?: boolean;
@@ -65,19 +63,17 @@ const buildCameraPatch = ({
   temperatureC?: number | null;
   recording?: boolean;
   motionDetected?: boolean;
+  measuredFps?: number | null;
+  lastFrameAgeMs?: number | null;
   isOnline: boolean;
-} => {
-  const patch: {
-    mode?: CameraMode;
-    irMode?: IRMode;
-    irEnabled?: boolean;
-    pan?: number;
-    tilt?: number;
-    temperatureC?: number | null;
-    recording?: boolean;
-    motionDetected?: boolean;
-    isOnline: boolean;
-  } = {
+}
+
+const buildCameraPatch = ({
+  data,
+}: {
+  data: ApiParams['data'];
+}): CameraStatePatch => {
+  const patch: CameraStatePatch = {
     isOnline: data.isOnline,
   };
 
@@ -104,6 +100,12 @@ const buildCameraPatch = ({
   }
   if (data.recording !== undefined) {
     patch.recording = data.recording;
+  }
+  if (data.measuredFps !== undefined) {
+    patch.measuredFps = data.measuredFps;
+  }
+  if (data.lastFrameAgeMs !== undefined) {
+    patch.lastFrameAgeMs = data.lastFrameAgeMs;
   }
 
   return patch;
@@ -155,6 +157,14 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   }
 
   if (data.recording !== undefined && typeof data.recording !== 'boolean') {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (data.measuredFps !== undefined && data.measuredFps !== null && typeof data.measuredFps !== 'number') {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (data.lastFrameAgeMs !== undefined && data.lastFrameAgeMs !== null && typeof data.lastFrameAgeMs !== 'number') {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 

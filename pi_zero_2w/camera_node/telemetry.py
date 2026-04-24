@@ -44,6 +44,8 @@ def to_ingest_payload(
         "temperatureC": state.temperature_c,
         "motionDetected": state.motion_detected,
         "recording": state.recording,
+        "measuredFps": state.measured_fps,
+        "lastFrameAgeMs": state.last_frame_age_ms,
     }
 
     if command_result:

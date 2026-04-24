@@ -17,6 +17,8 @@ interface PageProps {
   searchParams?: Record<string, string | undefined>;
 }
 
+type CameraQuality = 'low' | 'medium' | 'high';
+
 interface CameraListItem {
   id: string;
   slug: string;
@@ -24,6 +26,8 @@ interface CameraListItem {
   isOnline: boolean;
   mode: 'off' | 'idle' | 'live' | 'record';
   irMode: 'off' | 'on' | 'auto';
+  targetFps: number;
+  quality: CameraQuality;
   canPreview: boolean;
   canControl: boolean;
   lastSeenAt: string | null;
@@ -40,6 +44,8 @@ interface CameraState {
   temperatureC: number | null;
   recording: boolean;
   motionDetected: boolean;
+  measuredFps: number | null;
+  lastFrameAgeMs: number | null;
   updatedAt: string;
 }
 
@@ -309,6 +315,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
             ...(serverOutput.patch.temperatureC === undefined ? {} : { temperatureC: serverOutput.patch.temperatureC }),
             ...(serverOutput.patch.motionDetected === undefined ? {} : { motionDetected: serverOutput.patch.motionDetected }),
             ...(serverOutput.patch.recording === undefined ? {} : { recording: serverOutput.patch.recording }),
+            ...(serverOutput.patch.measuredFps === undefined ? {} : { measuredFps: serverOutput.patch.measuredFps }),
+            ...(serverOutput.patch.lastFrameAgeMs === undefined ? {} : { lastFrameAgeMs: serverOutput.patch.lastFrameAgeMs }),
             updatedAt: serverOutput.at,
           };
         });
@@ -541,6 +549,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       return;
     }
 
+    console.log('[preview] sending offer to server');
     const offerResponse = await apiRequest({
       name: 'cameras/webrtc/offer',
       version: 'v1',
@@ -549,6 +558,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
         offerSdp,
       },
     });
+    console.log('[preview] offer response status:', offerResponse.status, 'pc state:', peerConnection.signalingState, 'pcRef match:', previewPeerRef.current === peerConnection);
 
     if (offerResponse.status === 'error') {
       previewStartingRef.current = false;
@@ -560,12 +570,20 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       return;
     }
 
+    // If this PC was torn down while the API call was in flight, don't touch it.
+    if (previewPeerRef.current !== peerConnection) {
+      console.warn('[preview] PC no longer current, skipping setRemoteDescription');
+      return;
+    }
+
+    console.log('[preview] calling setRemoteDescription, answer length:', offerResponse.answerSdp.length);
     const [remoteDescriptionError] = await tryCatch(async () => {
       return peerConnection.setRemoteDescription({
         type: 'answer',
         sdp: offerResponse.answerSdp,
       });
     });
+    console.log('[preview] setRemoteDescription result:', remoteDescriptionError ? `ERROR: ${String(remoteDescriptionError)}` : 'success', 'signalingState:', peerConnection.signalingState);
 
     if (remoteDescriptionError) {
       previewStartingRef.current = false;
@@ -723,25 +741,18 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
   const qualityLabel = useMemo(() => {
     if (!selectedCamera) {
-      return '4K';
+      return '—';
     }
+    return selectedCamera.quality.toUpperCase();
+  }, [selectedCamera]);
 
-    if (!previewActive) {
-      return 'STBY';
+  const fpsLabel = useMemo(() => {
+    const measured = cameraState?.measuredFps;
+    if (!previewActive || measured === null || measured === undefined) {
+      return '—';
     }
-
-    if (cameraState?.mode === 'record') {
-      return '4K';
-    }
-
-    if (cameraState?.mode === 'live') {
-      return '1080P';
-    }
-
-    return '4K';
-  }, [cameraState?.mode, previewActive, selectedCamera]);
-
-  const fpsLabel = previewActive ? '45FPS' : '0FPS';
+    return `${String(Math.round(measured))}FPS`;
+  }, [cameraState?.measuredFps, previewActive]);
   const zoomLabel = `${(1 + (zoomLevel / 30)).toFixed(1)}X`;
   const recordingActive = Boolean(cameraState?.recording);
   const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';

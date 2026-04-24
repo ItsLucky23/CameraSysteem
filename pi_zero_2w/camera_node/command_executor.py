@@ -52,8 +52,13 @@ class CommandExecutor:
                         result="rejected",
                         reason_code="camera.invalidInput",
                     )
-                rtp_host, rtp_port = validation
-                await self._adapter.start_video_stream(rtp_host=rtp_host, rtp_port=rtp_port)
+                rtp_host, rtp_port, target_fps, bitrate_bps = validation
+                await self._adapter.start_video_stream(
+                    rtp_host=rtp_host,
+                    rtp_port=rtp_port,
+                    target_fps=target_fps,
+                    bitrate_bps=bitrate_bps,
+                )
             elif command.action == "stopVideoStream":
                 await self._adapter.stop_video_stream()
             else:
@@ -79,19 +84,13 @@ class CommandExecutor:
         )
 
 
-def _validate_start_video_stream(payload: dict[str, Any]) -> tuple[str, int] | None:
+def _validate_start_video_stream(
+    payload: dict[str, Any],
+) -> tuple[str, int, int, int] | None:
     rtp_host_raw = payload.get("rtpHost")
     rtp_port_raw = payload.get("rtpPort")
-
-    logger.warning(
-        "startVideoStream payload debug: payload_type=%s keys=%s rtpHost=%r (type=%s) rtpPort=%r (type=%s)",
-        type(payload).__name__,
-        list(payload.keys()) if isinstance(payload, dict) else "N/A",
-        rtp_host_raw,
-        type(rtp_host_raw).__name__,
-        rtp_port_raw,
-        type(rtp_port_raw).__name__,
-    )
+    target_fps_raw = payload.get("targetFps")
+    bitrate_bps_raw = payload.get("bitrateBps")
 
     if not isinstance(rtp_host_raw, str):
         return None
@@ -106,4 +105,19 @@ def _validate_start_video_stream(payload: dict[str, Any]) -> tuple[str, int] | N
     if rtp_port_raw <= 0 or rtp_port_raw > 65535:
         return None
 
-    return rtp_host, rtp_port_raw
+    if isinstance(target_fps_raw, bool):
+        return None
+    if not isinstance(target_fps_raw, int):
+        return None
+    if target_fps_raw < 1 or target_fps_raw > 60:
+        return None
+
+    if isinstance(bitrate_bps_raw, bool):
+        return None
+    if not isinstance(bitrate_bps_raw, int):
+        return None
+    # Sanity window: 100 kbps .. 20 Mbps
+    if bitrate_bps_raw < 100_000 or bitrate_bps_raw > 20_000_000:
+        return None
+
+    return rtp_host, rtp_port_raw, target_fps_raw, bitrate_bps_raw

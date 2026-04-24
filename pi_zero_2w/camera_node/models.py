@@ -15,6 +15,10 @@ class CameraState:
     temperature_c: float | None = None
     motion_detected: bool = False
     recording: bool = False
+    # Live video pipeline stats. None when the stream is not running or
+    # ffmpeg has not yet produced a stats line.
+    measured_fps: float | None = None
+    last_frame_age_ms: int | None = None
 
 
 @dataclass(slots=True)

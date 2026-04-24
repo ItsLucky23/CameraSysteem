@@ -37,6 +37,8 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         isOnline: boolean;
         mode: 'off' | 'idle' | 'live' | 'record';
         irMode: 'off' | 'on' | 'auto';
+        targetFps: number;
+        quality: 'low' | 'medium' | 'high';
         lastSeenAt: Date | null;
       }) => ({
         id: camera.id,
@@ -45,6 +47,8 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         isOnline: camera.isOnline,
         mode: camera.mode,
         irMode: camera.irMode,
+        targetFps: camera.targetFps,
+        quality: camera.quality,
         canPreview: true,
         canControl: true,
         lastSeenAt: camera.lastSeenAt ? camera.lastSeenAt.toISOString() : null,
@@ -85,6 +89,8 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         isOnline: boolean;
         mode: 'off' | 'idle' | 'live' | 'record';
         irMode: 'off' | 'on' | 'auto';
+        targetFps: number;
+        quality: 'low' | 'medium' | 'high';
         lastSeenAt: Date | null;
       };
     }) => ({
@@ -94,6 +100,8 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
       isOnline: accessRow.camera.isOnline,
       mode: accessRow.camera.mode,
       irMode: accessRow.camera.irMode,
+      targetFps: accessRow.camera.targetFps,
+      quality: accessRow.camera.quality,
       canPreview: accessRow.canPreview,
       canControl: accessRow.canControl,
       lastSeenAt: accessRow.camera.lastSeenAt ? accessRow.camera.lastSeenAt.toISOString() : null,
