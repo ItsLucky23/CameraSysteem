@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import shlex
 import time
 
@@ -12,12 +11,6 @@ logger = logging.getLogger(__name__)
 # V1 is locked to 1080p; fps + bitrate come from Pi 5 per-camera config.
 FRAME_WIDTH = 1920
 FRAME_HEIGHT = 1080
-
-# ffmpeg prints stats to stderr like:
-#   frame=  123 fps= 30 q=-1.0 size=...
-# Default cadence is ~every 500ms. We parse both the cumulative frame count and
-# the instantaneous fps to drive Pi 5 telemetry.
-_FFMPEG_STATS_RE = re.compile(r"frame=\s*(\d+)\s+fps=\s*([\d.]+)")
 
 
 class VideoPublisher:
@@ -164,6 +157,7 @@ class VideoPublisher:
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "warning",
+            "-progress", "pipe:2",               # stream frame=/fps= lines to stderr for telemetry
             "-fflags", "+genpts",
             "-f", "h264",
             "-i", "pipe:0",
@@ -180,40 +174,51 @@ class VideoPublisher:
         if process.stderr is None:
             return
 
+        # ffmpeg's default stats line goes to stderr but is silenced by
+        # -loglevel warning. We use -progress pipe:2 in the pipeline instead,
+        # which emits newline-terminated key=value lines regardless of log
+        # level. readline() handles both those and regular stderr warnings.
         while True:
-            # ffmpeg writes stats with \r (carriage return) between updates rather
-            # than \n, so readline() would block until the process exits. readuntil
-            # on \r keeps us responsive to the ~500ms stats cadence.
             try:
-                chunk = await process.stderr.readuntil(b"\r")
-            except asyncio.IncompleteReadError as error:
-                chunk = error.partial
-                if not chunk:
-                    break
-            except asyncio.LimitOverrunError:
-                # Oversized line; skip and keep reading.
-                continue
+                line = await process.stderr.readline()
+            except asyncio.IncompleteReadError:
+                break
 
-            text = chunk.decode(errors="replace").rstrip()
+            if not line:
+                break
+
+            text = line.decode(errors="replace").rstrip()
             if not text:
                 continue
 
             self._consume_stderr_line(text)
 
     def _consume_stderr_line(self, text: str) -> None:
-        match = _FFMPEG_STATS_RE.search(text)
-        if match is None:
+        # Progress lines look like "frame=123", "fps=30.00", "progress=continue".
+        if "=" not in text:
             logger.debug("video pipeline: %s", text)
             return
 
-        frame_count = int(match.group(1))
-        try:
-            fps_value = float(match.group(2))
-        except ValueError:
+        key, _, value = text.partition("=")
+        key = key.strip()
+        value = value.strip()
+
+        if key == "frame":
+            try:
+                frame_count = int(value)
+            except ValueError:
+                return
+            if frame_count > self._last_frame_count:
+                self._last_frame_at = time.monotonic()
+                self._last_frame_count = frame_count
             return
 
-        if frame_count > self._last_frame_count:
-            self._last_frame_at = time.monotonic()
-            self._last_frame_count = frame_count
+        if key == "fps":
+            try:
+                self._measured_fps = float(value)
+            except ValueError:
+                return
+            return
 
-        self._measured_fps = fps_value
+        # Non-progress lines (warnings, info) just go to debug logs.
+        logger.debug("video pipeline: %s", text)

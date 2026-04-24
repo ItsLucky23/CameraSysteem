@@ -49,9 +49,14 @@ const fetchCameraStreamConfig = async (
     return null;
   }
 
+  // MongoDB docs created before the schema added these fields won't carry them.
+  // Fall back to the schema defaults so the stream still starts.
+  const targetFps = typeof camera.targetFps === 'number' ? camera.targetFps : 15;
+  const quality = camera.quality ?? 'medium';
+
   return {
-    targetFps: camera.targetFps,
-    bitrateBps: resolveBitrateBps(camera.quality),
+    targetFps,
+    bitrateBps: resolveBitrateBps(quality),
   };
 };
 
@@ -81,6 +86,9 @@ const activateCamera = async ({
     console.error(`cameraStreamOrchestrator: failed to fetch stream config for ${cameraId}`);
     return;
   }
+  console.log(
+    `cameraStreamOrchestrator: stream config for ${cameraId} -> targetFps=${String(streamConfig.targetFps)} bitrateBps=${String(streamConfig.bitrateBps)}`,
+  );
 
   const [ingestError, ingestResult] = await tryCatch(() => {
     if (isCameraIngestRunning(cameraId)) {

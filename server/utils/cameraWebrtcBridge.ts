@@ -12,9 +12,20 @@ interface IceCandidatePayload {
 
 const MAX_ICE_WAIT_MS = 2000;
 
+// Stale-peer reaper thresholds. Dev HMR cycles leak PCs because the client
+// teardown doesn't always propagate an ICE-close to the server; the reaper
+// sweeps them instead of letting the peers Set grow forever.
+const STALE_PEER_SWEEP_INTERVAL_MS = 5000;
+const MAX_NON_CONNECTED_AGE_MS = 15000;
+const MAX_DISCONNECTED_AGE_MS = 10000;
+
 interface ForwardPeer {
   peerConnection: RTCPeerConnection;
   track: MediaStreamTrack;
+  createdAt: number;
+  lastConnectedAt: number | null;
+  disconnectedSince: number | null;
+  dispose: () => void;
 }
 
 interface CameraIngest {
@@ -50,6 +61,40 @@ if (!globalScope[SINGLETON_KEY]) {
 
 const ingestByCameraId = singletonState.ingestByCameraId;
 const allocatedPorts = singletonState.allocatedPorts;
+
+let stalePeerReaperTimer: ReturnType<typeof globalThis.setInterval> | null = null;
+
+const ensureStalePeerReaper = (): void => {
+  if (stalePeerReaperTimer !== null) {
+    return;
+  }
+  stalePeerReaperTimer = globalThis.setInterval(() => {
+    const now = Date.now();
+    for (const ingest of ingestByCameraId.values()) {
+      for (const peer of ingest.peers) {
+        const connectionState = peer.peerConnection.connectionState;
+        const ageMs = now - peer.createdAt;
+
+        // Never reached connected and has been around too long -> HMR ghost.
+        if (peer.lastConnectedAt === null && ageMs > MAX_NON_CONNECTED_AGE_MS) {
+          console.warn(
+            `cameraWebrtcBridge[${ingest.cameraId}] reaping peer that never connected (ageMs=${String(ageMs)}, state=${connectionState})`,
+          );
+          peer.dispose();
+          continue;
+        }
+
+        // Sat in 'disconnected' beyond the grace window -> reap.
+        if (peer.disconnectedSince !== null && now - peer.disconnectedSince > MAX_DISCONNECTED_AGE_MS) {
+          console.warn(
+            `cameraWebrtcBridge[${ingest.cameraId}] reaping disconnected peer (disconnectedMs=${String(now - peer.disconnectedSince)})`,
+          );
+          peer.dispose();
+        }
+      }
+    }
+  }, STALE_PEER_SWEEP_INTERVAL_MS);
+};
 
 const basePort = (() => {
   const parsed = Number.parseInt(process.env.PI5_VIDEO_INGEST_PORT_BASE ?? '', 10);
@@ -257,7 +302,14 @@ export const createCameraWebrtcAnswer = async ({
   const track = new MediaStreamTrack({ kind: 'video' });
   peerConnection.addTransceiver(track, { direction: 'sendonly' });
 
-  const peer: ForwardPeer = { peerConnection, track };
+  const peer: ForwardPeer = {
+    peerConnection,
+    track,
+    createdAt: Date.now(),
+    lastConnectedAt: null,
+    disconnectedSince: null,
+    dispose: () => { /* replaced below */ },
+  };
   ingest.peers.add(peer);
 
   const closeConnection = () => {
@@ -270,11 +322,27 @@ export const createCameraWebrtcAnswer = async ({
     void tryCatch(async () => peerConnection.close());
   };
 
+  peer.dispose = closeConnection;
+
   peerConnection.connectionStateChange.subscribe((state) => {
-    if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+    const now = Date.now();
+    if (state === 'connected') {
+      peer.lastConnectedAt = now;
+      peer.disconnectedSince = null;
+      return;
+    }
+    if (state === 'disconnected') {
+      // Transient ICE blips aren't fatal on their own; the reaper closes the
+      // peer if it stays disconnected past MAX_DISCONNECTED_AGE_MS.
+      peer.disconnectedSince ??= now;
+      return;
+    }
+    if (state === 'failed' || state === 'closed') {
       closeConnection();
     }
   });
+
+  ensureStalePeerReaper();
 
   const [remoteDescriptionError] = await tryCatch(async () => {
     return peerConnection.setRemoteDescription({ type: 'offer', sdp: offerSdp });
