@@ -85,6 +85,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   return {
     status: 'success',
     cameraId,
+    peerId: bridgeResponse.peerId,
     answerSdp: bridgeResponse.answerSdp,
     iceCandidates: bridgeResponse.iceCandidates,
   };

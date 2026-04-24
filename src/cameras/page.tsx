@@ -73,6 +73,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const { upsertSyncEventCallback } = useSyncEvents();
 
   const previewPeerRef = useRef<RTCPeerConnection | null>(null);
+  const previewPeerIdRef = useRef<string | null>(null);
+  const previewPeerCameraIdRef = useRef<string | null>(null);
   const previewStartingRef = useRef<boolean>(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
@@ -137,6 +139,21 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     previewPeerRef.current.onconnectionstatechange = null;
     previewPeerRef.current.close();
     previewPeerRef.current = null;
+
+    // Tell the Pi 5 to release its side of the PC immediately. Without this,
+    // the server-side peer waits for ICE consent failure (~30-60s) and stacks
+    // during page navigation / HMR.
+    const peerId = previewPeerIdRef.current;
+    const cameraId = previewPeerCameraIdRef.current;
+    previewPeerIdRef.current = null;
+    previewPeerCameraIdRef.current = null;
+    if (peerId && cameraId) {
+      void apiRequest({
+        name: 'cameras/webrtc/close',
+        version: 'v1',
+        data: { cameraId, peerId },
+      });
+    }
   }, []);
 
   const stopPreview = useCallback(() => {
@@ -571,10 +588,22 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     }
 
     // If this PC was torn down while the API call was in flight, don't touch it.
+    // We do still need to tell the server to close the peer it just allocated
+    // for this offer, otherwise that peer leaks.
     if (previewPeerRef.current !== peerConnection) {
       console.warn('[preview] PC no longer current, skipping setRemoteDescription');
+      if (offerResponse.peerId) {
+        void apiRequest({
+          name: 'cameras/webrtc/close',
+          version: 'v1',
+          data: { cameraId: selectedCameraId, peerId: offerResponse.peerId },
+        });
+      }
       return;
     }
+
+    previewPeerIdRef.current = offerResponse.peerId;
+    previewPeerCameraIdRef.current = selectedCameraId;
 
     console.log('[preview] calling setRemoteDescription, answer length:', offerResponse.answerSdp.length);
     const [remoteDescriptionError] = await tryCatch(async () => {

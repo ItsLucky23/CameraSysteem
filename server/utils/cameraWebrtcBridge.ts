@@ -1,4 +1,5 @@
 import { createSocket, Socket } from 'node:dgram';
+import { randomUUID } from 'node:crypto';
 
 import { MediaStreamTrack, RTCPeerConnection, RtpPacket, useH264 } from 'werift';
 
@@ -20,6 +21,7 @@ const MAX_NON_CONNECTED_AGE_MS = 15000;
 const MAX_DISCONNECTED_AGE_MS = 10000;
 
 interface ForwardPeer {
+  peerId: string;
   peerConnection: RTCPeerConnection;
   track: MediaStreamTrack;
   createdAt: number;
@@ -269,6 +271,7 @@ interface CreateCameraWebrtcAnswerParams {
 type CameraWebrtcAnswerResult =
   | {
       status: 'success';
+      peerId: string;
       answerSdp: string;
       iceCandidates: IceCandidatePayload[];
     }
@@ -302,7 +305,9 @@ export const createCameraWebrtcAnswer = async ({
   const track = new MediaStreamTrack({ kind: 'video' });
   peerConnection.addTransceiver(track, { direction: 'sendonly' });
 
+  const peerId = randomUUID();
   const peer: ForwardPeer = {
+    peerId,
     peerConnection,
     track,
     createdAt: Date.now(),
@@ -401,9 +406,30 @@ export const createCameraWebrtcAnswer = async ({
 
   return {
     status: 'success',
+    peerId,
     answerSdp,
     iceCandidates: [],
   };
+};
+
+export const closeCameraWebrtcPeer = ({
+  cameraId,
+  peerId,
+}: {
+  cameraId: string;
+  peerId: string;
+}): boolean => {
+  const ingest = ingestByCameraId.get(cameraId);
+  if (!ingest) {
+    return false;
+  }
+  for (const peer of ingest.peers) {
+    if (peer.peerId === peerId) {
+      peer.dispose();
+      return true;
+    }
+  }
+  return false;
 };
 
 export default createCameraWebrtcAnswer;

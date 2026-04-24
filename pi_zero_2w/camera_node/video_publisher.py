@@ -178,11 +178,21 @@ class VideoPublisher:
         # -loglevel warning. We use -progress pipe:2 in the pipeline instead,
         # which emits newline-terminated key=value lines regardless of log
         # level. readline() handles both those and regular stderr warnings.
+        # We also count incoming lines so the caller can confirm the drain is
+        # alive when FPS telemetry is suspiciously null.
+        lines_seen = 0
+        progress_lines_seen = 0
+
         while True:
             try:
                 line = await process.stderr.readline()
             except asyncio.IncompleteReadError:
                 break
+            except asyncio.LimitOverrunError:
+                # rpicam-vid occasionally writes oversized non-terminated chunks on startup.
+                # Drop the oversized buffer and keep reading so the drain task stays alive.
+                process.stderr._buffer.clear()  # type: ignore[attr-defined]
+                continue
 
             if not line:
                 break
@@ -191,7 +201,27 @@ class VideoPublisher:
             if not text:
                 continue
 
+            lines_seen += 1
+            is_progress = "=" in text and text.split("=", 1)[0].strip() in {
+                "frame", "fps", "bitrate", "total_size", "out_time_us",
+                "out_time", "dup_frames", "drop_frames", "speed", "progress",
+            }
+            if is_progress:
+                progress_lines_seen += 1
+                if progress_lines_seen == 1:
+                    logger.info(
+                        "VideoPublisher received first ffmpeg progress line after %s stderr lines: %s",
+                        lines_seen,
+                        text,
+                    )
+
             self._consume_stderr_line(text)
+
+        logger.info(
+            "VideoPublisher stderr drain ended: lines_seen=%s progress_lines=%s",
+            lines_seen,
+            progress_lines_seen,
+        )
 
     def _consume_stderr_line(self, text: str) -> None:
         # Progress lines look like "frame=123", "fps=30.00", "progress=continue".

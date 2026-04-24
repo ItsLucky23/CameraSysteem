@@ -278,7 +278,11 @@ export const onCameraStreamConfigChanged = async ({
   cameraId: string;
   cameraIp: string;
 }): Promise<void> => {
-  if (!activatedCameraIds.has(cameraId)) {
+  const isActive = activatedCameraIds.has(cameraId);
+  console.log(
+    `cameraStreamOrchestrator: onCameraStreamConfigChanged ${cameraId} (isActive=${String(isActive)})`,
+  );
+  if (!isActive) {
     return;
   }
 
