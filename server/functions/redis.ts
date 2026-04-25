@@ -42,5 +42,15 @@ redis.on('error', (err) => {
 //   } while (cursor !== '0');
 // }
 
-export { redis };
+//? Subscriber connection used for pub/sub. ioredis requires a dedicated
+//? connection for SUBSCRIBE — once subscribed, normal commands cannot run on
+//? the same connection. We create it here so any module needing pub/sub uses
+//? the same shared subscriber.
+const redisSubscriber = redis.duplicate();
+
+redisSubscriber.on('error', (err) => {
+  console.error('Error on Redis subscriber connection:', err);
+});
+
+export { redis, redisSubscriber };
 export default redis as Redis;

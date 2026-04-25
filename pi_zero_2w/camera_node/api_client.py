@@ -49,14 +49,21 @@ class Pi5ApiClient:
         camera_ip: str,
         node_secret: str,
         limit: int,
+        long_poll_ms: int = 25000,
+        request_timeout_sec: float = 35.0,
     ) -> list[CameraCommand]:
+        # Long-poll: tell the Pi 5 it can hold the response open up to long_poll_ms.
+        # request_timeout_sec must comfortably exceed long_poll_ms so we don't trip
+        # the client side timeout on idle hold.
         response = await self._post(
             endpoint="/api/cameras/getPendingNodeCommands/v1",
             data={
                 "cameraIp": camera_ip,
                 "nodeSecret": node_secret,
                 "limit": limit,
+                "waitMs": long_poll_ms,
             },
+            timeout_sec=request_timeout_sec,
         )
 
         commands_raw = response.get("commands")
@@ -80,7 +87,13 @@ class Pi5ApiClient:
             data=payload,
         )
 
-    async def _post(self, *, endpoint: str, data: dict[str, Any]) -> dict[str, Any]:
+    async def _post(
+        self,
+        *,
+        endpoint: str,
+        data: dict[str, Any],
+        timeout_sec: float | None = None,
+    ) -> dict[str, Any]:
         if not self._session:
             raise Pi5ApiError("Pi5 API client session is not open")
 
@@ -90,8 +103,12 @@ class Pi5ApiClient:
         # Sending {"data": ...} adds an extra nesting level and fails runtime type validation.
         # Connection/timeout errors are wrapped so the runtime's Pi5ApiError handlers catch
         # them uniformly and the node keeps retrying instead of crashing.
+        request_kwargs: dict[str, Any] = {"json": data}
+        if timeout_sec is not None:
+            request_kwargs["timeout"] = aiohttp.ClientTimeout(total=timeout_sec)
+
         try:
-            async with self._session.post(url, json=data) as response:
+            async with self._session.post(url, **request_kwargs) as response:
                 status_code = response.status
                 try:
                     body = await response.json(content_type=None)

@@ -1,6 +1,7 @@
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
+import { waitForCommandSignal } from '../../../server/functions/cameraNode';
 
 export const rateLimit: number | false = 240;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -15,10 +16,16 @@ export interface ApiParams {
     cameraIp: string;
     nodeSecret: string;
     limit?: number;
+    waitMs?: number;
   };
   user: SessionLayout;
   functions: Functions;
 }
+
+//? Cap how long the server holds the request open. Has to be shorter than the
+//? Pi Zero side HTTP timeout, and well under any upstream proxy idle timeout
+//? (most are 60s+).
+const MAX_LONG_POLL_MS = 25000;
 
 export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
   const cameraIp = data.cameraIp.trim();
@@ -37,14 +44,41 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     return { status: 'error', errorCode: 'camera.nodeUnauthorized', httpStatus: 403 };
   }
 
-  const [pendingError, commands] = await tryCatch(async () => {
-    return functions.cameraNode.getPendingCommands({
-      cameraIp,
-      limit: typeof data.limit === 'number' ? data.limit : 20,
-    });
+  const limit = typeof data.limit === 'number' ? data.limit : 20;
+  const requestedWaitMs = typeof data.waitMs === 'number' ? data.waitMs : MAX_LONG_POLL_MS;
+  const waitMs = Math.max(0, Math.min(MAX_LONG_POLL_MS, requestedWaitMs));
+
+  //? First-pass drain. If the queue already has work, return immediately and
+  //? skip the long-poll. Common case when commands are firing in quick bursts
+  //? (e.g. PTZ hold, or reconciler-triggered stop+start).
+  const [firstPopError, firstBatch] = await tryCatch(async () => {
+    return functions.cameraNode.getPendingCommands({ cameraIp, limit });
   });
 
-  if (pendingError || !commands) {
+  if (firstPopError || !firstBatch) {
+    return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 500 };
+  }
+
+  if (firstBatch.length > 0 || waitMs === 0) {
+    return {
+      status: 'success',
+      cameraIp,
+      channel: functions.cameraNode.getCommandChannel(),
+      commands: firstBatch,
+    };
+  }
+
+  //? Block until either the pub/sub channel signals a new command for this
+  //? cameraIp or the long-poll timeout elapses. The waiter resolves true when
+  //? a publish wakes it (re-LPOP to drain) and false on timeout (return empty
+  //? so the Pi Zero can reissue the request immediately).
+  await waitForCommandSignal({ cameraIp, timeoutMs: waitMs });
+
+  const [secondPopError, secondBatch] = await tryCatch(async () => {
+    return functions.cameraNode.getPendingCommands({ cameraIp, limit });
+  });
+
+  if (secondPopError || !secondBatch) {
     return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 500 };
   }
 
@@ -52,6 +86,6 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     status: 'success',
     cameraIp,
     channel: functions.cameraNode.getCommandChannel(),
-    commands,
+    commands: secondBatch,
   };
 };

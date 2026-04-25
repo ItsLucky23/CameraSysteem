@@ -123,7 +123,18 @@ export const emitCameraSyncEvent = ({
   receiver: string;
   serverOutput: Record<string, unknown>;
 }): void => {
+  //? Pull cameraId out of the payload so every emit log is greppable by camera.
+  const cameraId = typeof (serverOutput as { cameraId?: unknown }).cameraId === 'string'
+    ? (serverOutput as { cameraId: string }).cameraId
+    : null;
+  const tag = cameraId ? `[cam ${cameraId}]` : '[cam ?]';
+
   if (!ioInstance) {
+    //? Loud about this — if it ever fires it means the HTTP API runs in a
+    //? module instance that hasn't seen loadSocket() (HMR / split bundles).
+    console.warn(
+      `${tag} emitCameraSyncEvent: ioInstance is null, dropping ${fullName} -> ${receiver}`,
+    );
     return;
   }
 
@@ -140,9 +151,17 @@ export const emitCameraSyncEvent = ({
   };
 
   if (receiver === 'all') {
+    const recipients = ioInstance.sockets.sockets.size;
+    console.log(`${tag} sync emit ${fullName} -> all (sockets=${String(recipients)})`);
     ioInstance.emit('sync', payload);
     return;
   }
 
+  //? Count membership BEFORE emit so we can tell whether the client is actually
+  //? in the receiver room. If members=0 but the user expects to be subscribed,
+  //? the client either never joined or its room membership was lost on a reconnect.
+  const room = ioInstance.sockets.adapter.rooms.get(receiver);
+  const roomSize = room ? room.size : 0;
+  console.log(`${tag} sync emit ${fullName} -> ${receiver} (members=${String(roomSize)})`);
   ioInstance.to(receiver).emit('sync', payload);
 };

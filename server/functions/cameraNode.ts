@@ -1,7 +1,52 @@
-import redis from './redis';
+import redis, { redisSubscriber } from './redis';
 
 const projectPrefix = process.env.PROJECT_NAME ? `${process.env.PROJECT_NAME}-` : '';
 const NODE_COMMAND_CHANNEL = `${projectPrefix}camera-node:commands`;
+
+//? Per-cameraIp long-poll waiter registry. When a Pi Zero polls and the queue
+//? is empty, we register a one-shot resolver here and wait for either an
+//? enqueueCommand pub/sub notification or a timeout. This eliminates the
+//? Pi-Zero-side polling loop without forcing the node into socket.io.
+type CommandWaiter = () => void;
+const waitersByCameraIp = new Map<string, Set<CommandWaiter>>();
+let subscriberInitialized = false;
+
+const ensureCommandSubscriber = (): void => {
+  if (subscriberInitialized) {
+    return;
+  }
+  subscriberInitialized = true;
+
+  void redisSubscriber.subscribe(NODE_COMMAND_CHANNEL).catch((err) => {
+    console.error('cameraNode: failed to subscribe to command channel', err);
+    subscriberInitialized = false;
+  });
+
+  redisSubscriber.on('message', (channel, message) => {
+    if (channel !== NODE_COMMAND_CHANNEL) {
+      return;
+    }
+    let parsed: { cameraIp?: unknown };
+    try {
+      parsed = JSON.parse(message) as { cameraIp?: unknown };
+    } catch {
+      return;
+    }
+    const cameraIp = typeof parsed.cameraIp === 'string' ? parsed.cameraIp.trim() : '';
+    if (!cameraIp) {
+      return;
+    }
+    const waiters = waitersByCameraIp.get(cameraIp);
+    if (!waiters || waiters.size === 0) {
+      return;
+    }
+    //? Wake every waiter for this cameraIp. Each one will LPOP and decide
+    //? whether the message it received was its own.
+    for (const waiter of waiters) {
+      waiter();
+    }
+  });
+};
 
 export interface CameraNodeCommand {
   commandId: string;
@@ -65,6 +110,10 @@ export const enqueueCommand = async ({
 
   const publishedReceivers = await redis.publish(NODE_COMMAND_CHANNEL, message);
 
+  console.log(
+    `[cam ${cameraId}] enqueueCommand action=${action} commandId=${commandId} ip=${normalizedCameraIp} pubReceivers=${String(publishedReceivers)}`,
+  );
+
   return {
     queued: true,
     publishedReceivers,
@@ -112,4 +161,58 @@ export const getPendingCommands = async ({
 
   const raw = await redis.lpop(queueKey, safeLimit);
   return toCommandArray(raw);
+};
+
+//? Long-poll wait: register a waiter for this cameraIp, wait until either an
+//? enqueueCommand pub/sub message wakes it or `timeoutMs` elapses. Resolves
+//? with `true` if woken by a publish, `false` on timeout.
+export const waitForCommandSignal = async ({
+  cameraIp,
+  timeoutMs,
+}: {
+  cameraIp: string;
+  timeoutMs: number;
+}): Promise<boolean> => {
+  const normalizedCameraIp = cameraIp.trim();
+  if (!normalizedCameraIp) {
+    return false;
+  }
+
+  ensureCommandSubscriber();
+
+  return new Promise<boolean>((resolve) => {
+    let waiters = waitersByCameraIp.get(normalizedCameraIp);
+    if (!waiters) {
+      waiters = new Set<CommandWaiter>();
+      waitersByCameraIp.set(normalizedCameraIp, waiters);
+    }
+
+    let settled = false;
+    const cleanup = () => {
+      const set = waitersByCameraIp.get(normalizedCameraIp);
+      if (set) {
+        set.delete(waiter);
+        if (set.size === 0) {
+          waitersByCameraIp.delete(normalizedCameraIp);
+        }
+      }
+    };
+
+    const waiter: CommandWaiter = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cleanup();
+      resolve(true);
+    };
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(false);
+    }, Math.max(1, timeoutMs));
+
+    waiters.add(waiter);
+  });
 };

@@ -90,6 +90,30 @@ export default function loadSocket(httpServer: any) {
     if (token) {
       socketConnected({ token, io });
       notifySocketConnected(socket.id);
+
+      //? On reconnect the new socket has no room memberships even though
+      //? session.roomCodes still says the user belongs to those rooms — without
+      //? this, sync events emitted to a room never reach the user until they
+      //? explicitly call joinRoom again. Restore membership from the persisted
+      //? session so things like the cameras-page FPS counter keep working
+      //? across the inevitable proxy/VPN/tab-throttle disconnect-reconnect.
+      void (async () => {
+        const session = await getSession(token);
+        if (!session) {
+          return;
+        }
+        const roomCodes = getSessionRoomCodes(session);
+        if (roomCodes.length === 0) {
+          return;
+        }
+        for (const roomCode of roomCodes) {
+          await socket.join(roomCode);
+        }
+        console.log(
+          `Socket ${socket.id} rejoined ${String(roomCodes.length)} room(s) on connect: [${roomCodes.join(', ')}]`,
+          'cyan',
+        );
+      })();
     }
 
     socket.on('apiRequest', async (msg: apiMessage) => {

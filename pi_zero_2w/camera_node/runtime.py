@@ -40,41 +40,77 @@ class CameraNodeRuntime:
 
         try:
             async with self._api_client:
-                # Best-effort first ping; if Pi 5 is down we still enter the poll loop
+                # Best-effort first ping; if Pi 5 is down we still enter the loop
                 # and keep retrying instead of crashing the process.
                 await self._send_telemetry(command_result=None)
 
-                while self._running:
-                    processed_command = False
+                # Long-polling on commands can hold the request open up to 25s,
+                # so command and telemetry loops have to run in parallel — a
+                # single sequential loop would either starve telemetry (if it
+                # waits for commands) or burn cycles (if it polls).
+                command_task = asyncio.create_task(self._command_loop())
+                telemetry_task = asyncio.create_task(self._telemetry_loop())
 
+                done, pending = await asyncio.wait(
+                    {command_task, telemetry_task},
+                    return_when=asyncio.FIRST_EXCEPTION,
+                )
+
+                for task in pending:
+                    task.cancel()
+                for task in pending:
                     try:
-                        commands = await self._api_client.get_pending_commands(
-                            camera_ip=self._settings.camera_ip,
-                            node_secret=self._settings.node_secret,
-                            limit=self._settings.command_batch_limit,
-                        )
-                    except Pi5ApiError as error:
-                        logger.warning(
-                            "Failed to poll commands: %s (code=%s, status=%s)",
-                            error,
-                            error.error_code,
-                            error.http_status,
-                        )
-                        await self._sleep_poll_interval()
-                        continue
-
-                    for command in commands:
-                        result = await self._executor.execute(command)
-                        await self._send_telemetry(command_result=result)
-                        processed_command = True
-
-                    if not processed_command and self._telemetry_due():
-                        await self._send_telemetry(command_result=None)
-
-                    await self._sleep_poll_interval()
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                # Surface any exception from a finished task.
+                for task in done:
+                    task.result()
         finally:
             await self._adapter.shutdown()
             logger.info("Camera node runtime stopped")
+
+    async def _command_loop(self) -> None:
+        while self._running:
+            try:
+                commands = await self._api_client.get_pending_commands(
+                    camera_ip=self._settings.camera_ip,
+                    node_secret=self._settings.node_secret,
+                    limit=self._settings.command_batch_limit,
+                    long_poll_ms=self._settings.long_poll_ms,
+                    request_timeout_sec=self._settings.long_poll_request_timeout_sec,
+                )
+            except Pi5ApiError as error:
+                logger.warning(
+                    "Failed to poll commands: %s (code=%s, status=%s)",
+                    error,
+                    error.error_code,
+                    error.http_status,
+                )
+                # Back off only when the Pi 5 is unreachable / errored. On
+                # success (including a long-poll timeout returning an empty
+                # list) we re-issue immediately so a freshly enqueued command
+                # gets picked up with sub-second latency.
+                await self._sleep(self._settings.poll_error_backoff_ms)
+                continue
+
+            for command in commands:
+                result = await self._executor.execute(command)
+                await self._send_telemetry(command_result=result)
+
+            await self._sleep(self._settings.poll_interval_ms)
+
+    async def _telemetry_loop(self) -> None:
+        # Heartbeat-only telemetry. Command-result telemetry is sent inline
+        # from the command loop right after execute().
+        interval_sec = max(1.0, self._settings.telemetry_interval_sec)
+        while self._running:
+            await asyncio.sleep(interval_sec)
+            if not self._running:
+                return
+            if not self._telemetry_due():
+                continue
+            await self._send_telemetry(command_result=None)
 
     async def _send_telemetry(self, command_result: CommandResult | None) -> None:
         state = await self._adapter.get_state()
@@ -108,5 +144,7 @@ class CameraNodeRuntime:
         elapsed = time.monotonic() - self._last_telemetry_at
         return elapsed >= self._settings.telemetry_interval_sec
 
-    async def _sleep_poll_interval(self) -> None:
-        await asyncio.sleep(self._settings.poll_interval_ms / 1000.0)
+    async def _sleep(self, duration_ms: int) -> None:
+        if duration_ms <= 0:
+            return
+        await asyncio.sleep(duration_ms / 1000.0)

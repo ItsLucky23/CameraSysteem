@@ -56,6 +56,9 @@ class NodeSettings:
     node_secret: str
     adapter: str
     poll_interval_ms: int
+    poll_error_backoff_ms: int
+    long_poll_ms: int
+    long_poll_request_timeout_sec: float
     telemetry_interval_sec: float
     command_batch_limit: int
     http_timeout_sec: float
@@ -106,7 +109,14 @@ def load_settings() -> NodeSettings:
         camera_ip=camera_ip,
         node_secret=node_secret,
         adapter=os.getenv("HARDWARE_ADAPTER", "mock").strip().lower() or "mock",
-        poll_interval_ms=max(200, _parse_int(os.getenv("POLL_INTERVAL_MS"), 750)),
+        # With long-polling the node no longer needs to spin — the Pi 5 holds
+        # the request open until a command is enqueued or the long_poll_ms
+        # timeout fires. poll_interval_ms is just an idle nap between
+        # long-poll re-issues; keep it tiny.
+        poll_interval_ms=max(0, _parse_int(os.getenv("POLL_INTERVAL_MS"), 0)),
+        poll_error_backoff_ms=max(200, _parse_int(os.getenv("POLL_ERROR_BACKOFF_MS"), 1500)),
+        long_poll_ms=max(1000, _parse_int(os.getenv("LONG_POLL_MS"), 25000)),
+        long_poll_request_timeout_sec=max(2.0, _parse_float(os.getenv("LONG_POLL_REQUEST_TIMEOUT_SEC"), 35.0)),
         telemetry_interval_sec=max(1.0, _parse_float(os.getenv("TELEMETRY_INTERVAL_SEC"), 5.0)),
         command_batch_limit=max(1, min(100, _parse_int(os.getenv("COMMAND_BATCH_LIMIT"), 20))),
         http_timeout_sec=max(1.0, _parse_float(os.getenv("HTTP_TIMEOUT_SEC"), 8.0)),

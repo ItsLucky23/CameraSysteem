@@ -24,6 +24,11 @@ interface OrchestratorSingletonState {
   activatedCameraIds: Set<string>;
   reconcileTimer: ReturnType<typeof globalThis.setInterval> | null;
   cameraIpById: Map<string, string>;
+  // When the last socket disconnects we don't tear down the Pi Zero pipeline
+  // immediately — flaky proxies / VPN / browser-tab throttling cause spurious
+  // sub-second drops. We schedule a deferred deactivation and cancel it if a
+  // socket reconnects within the grace window.
+  pendingDeactivationTimer: ReturnType<typeof globalThis.setTimeout> | null;
 }
 
 const ORCHESTRATOR_SINGLETON_KEY = '__luckyStackCameraStreamOrchestratorState__';
@@ -37,6 +42,7 @@ const orchestratorState: OrchestratorSingletonState = orchestratorScope[ORCHESTR
   activatedCameraIds: new Set<string>(),
   reconcileTimer: null,
   cameraIpById: new Map<string, string>(),
+  pendingDeactivationTimer: null,
 };
 
 if (!orchestratorScope[ORCHESTRATOR_SINGLETON_KEY]) {
@@ -61,6 +67,13 @@ const cameraIpById = orchestratorState.cameraIpById;
 // produces an infinite stop/start loop. 20s gives enough slack on slow boots.
 const STREAM_STALL_THRESHOLD_MS = 20000;
 const RECONCILE_INTERVAL_MS = 4000;
+
+// When the last connected socket leaves, hold off tearing down the Pi Zero
+// pipeline for this long. Real-world client sockets flap intermittently
+// (proxy idle timeouts, VPN reconnects, browser tab throttling) and tearing
+// the camera down on every blip costs the user a 10-second cold-start the
+// next time they reconnect.
+const SOCKET_DEACTIVATION_GRACE_MS = 30000;
 
 // Quality -> bitrate (bits per second). rpicam-vid --bitrate takes bps.
 const qualityBitrateBps: Record<string, number> = {
@@ -357,13 +370,28 @@ const deactivateAllCameras = async (): Promise<void> => {
 };
 
 export const notifySocketConnected = (socketId: string): void => {
+  // If a deactivation was queued because the last socket left, cancel it.
+  // The user came back inside the grace window and we want to keep the
+  // already-running Pi Zero pipeline as-is (no restart cost).
+  if (orchestratorState.pendingDeactivationTimer !== null) {
+    globalThis.clearTimeout(orchestratorState.pendingDeactivationTimer);
+    orchestratorState.pendingDeactivationTimer = null;
+    console.log(
+      `cameraStreamOrchestrator: cancelled pending deactivation — socket ${socketId} reconnected within grace window`,
+    );
+  }
+
   const wasEmpty = connectedSocketIds.size === 0;
   connectedSocketIds.add(socketId);
   console.log(
     `cameraStreamOrchestrator: socket connected (id=${socketId}, total=${String(connectedSocketIds.size)}, wasEmpty=${String(wasEmpty)})`,
   );
 
-  if (wasEmpty) {
+  // Only re-activate if the camera set is actually empty. If the grace timer
+  // cancelled a pending deactivation, activatedCameraIds is still populated
+  // and activateCamera would short-circuit anyway, but skipping the call keeps
+  // the logs clean.
+  if (wasEmpty && activatedCameraIds.size === 0) {
     void activateAllEnabledCameras();
   }
 };
@@ -373,9 +401,28 @@ export const notifySocketDisconnected = (socketId: string): void => {
     return;
   }
 
-  if (connectedSocketIds.size === 0) {
-    void deactivateAllCameras();
+  if (connectedSocketIds.size > 0) {
+    return;
   }
+
+  // Last socket left. Defer the teardown — most disconnects we see in
+  // production are transient (transport close due to proxy idle), and
+  // restarting the pipeline costs a 10s libcamera cold start on reconnect.
+  if (orchestratorState.pendingDeactivationTimer !== null) {
+    globalThis.clearTimeout(orchestratorState.pendingDeactivationTimer);
+  }
+  console.log(
+    `cameraStreamOrchestrator: last socket disconnected — deferring deactivation by ${String(SOCKET_DEACTIVATION_GRACE_MS)}ms`,
+  );
+  orchestratorState.pendingDeactivationTimer = globalThis.setTimeout(() => {
+    orchestratorState.pendingDeactivationTimer = null;
+    if (connectedSocketIds.size > 0) {
+      // A reconnect happened between the last cancel-check and now. Skip.
+      return;
+    }
+    console.log('cameraStreamOrchestrator: grace window expired — deactivating all cameras');
+    void deactivateAllCameras();
+  }, SOCKET_DEACTIVATION_GRACE_MS);
 };
 
 // Called on server boot so any Pi Zeros left streaming by a previous Pi 5 instance stop.

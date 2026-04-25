@@ -205,6 +205,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   const cameraId = camera.id;
 
+  console.log(
+    `[cam ${cameraId}] telemetry received ip=${cameraIp} isOnline=${String(data.isOnline)} mode=${String(data.mode ?? '-')} measuredFps=${String(data.measuredFps ?? '-')} lastFrameAgeMs=${String(data.lastFrameAgeMs ?? '-')} temperatureC=${String(data.temperatureC ?? '-')} cmdResult=${data.commandResult ? `${data.commandResult.action}/${data.commandResult.result}` : '-'}`,
+  );
+
   const modeFromRecording: CameraMode | undefined = typeof data.recording === 'boolean'
     ? (data.recording ? 'record' : 'live')
     : undefined;
