@@ -32,7 +32,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   const slug = data.slug.trim().toLowerCase();
   const name = data.name.trim();
   const cameraIp = data.cameraIp.trim();
-  const targetFps = data.targetFps ?? 15;
+  // 0 = uncapped (sensor's native max). Treat any negative input (e.g. -1) as 0
+  // so the admin can express "no fps cap" as either value.
+  const rawFps = data.targetFps ?? 15;
+  const targetFps = Number.isFinite(rawFps) && rawFps < 0 ? 0 : rawFps;
   const quality: Quality = data.quality ?? 'medium';
 
   if (!slug || !name || !cameraIp) {
@@ -47,7 +50,7 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
-  if (!Number.isInteger(targetFps) || targetFps < 1 || targetFps > 60) {
+  if (!Number.isInteger(targetFps) || targetFps < 0 || targetFps > 60) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 

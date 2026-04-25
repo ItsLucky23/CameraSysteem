@@ -109,7 +109,8 @@ def _validate_start_video_stream(
         return None
     if not isinstance(target_fps_raw, int):
         return None
-    if target_fps_raw < 1 or target_fps_raw > 60:
+    # 0 = uncapped (no --framerate flag, sensor runs at native max).
+    if target_fps_raw < 0 or target_fps_raw > 60:
         return None
 
     if isinstance(bitrate_bps_raw, bool):

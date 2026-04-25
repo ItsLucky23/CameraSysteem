@@ -874,12 +874,18 @@ export default function AdminPage() {
                         className="w-full border-none bg-transparent p-0 text-sm font-medium text-title outline-none"
                         inputMode="numeric"
                         max={60}
-                        min={1}
+                        min={0}
                         onChange={(event) => {
                           const parsed = Number.parseInt(event.target.value, 10);
+                          if (!Number.isFinite(parsed)) {
+                            return;
+                          }
+                          // 0 = uncapped (sensor's native max). Negative inputs are
+                          // a UX shortcut for the same thing — normalize to 0.
+                          const next = parsed < 0 ? 0 : parsed;
                           setForm((previous) => ({
                             ...previous,
-                            targetFps: Number.isFinite(parsed) ? parsed : previous.targetFps,
+                            targetFps: next,
                           }));
                         }}
                         type="number"

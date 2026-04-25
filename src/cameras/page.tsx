@@ -779,11 +779,14 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
   const fpsLabel = useMemo(() => {
     const measured = cameraState?.measuredFps;
-    if (!previewActive || measured === null || measured === undefined) {
+    // Show measured fps whenever telemetry has it, regardless of whether the
+    // local WebRTC preview is currently connected. This way the user sees the
+    // configured rate take effect even if their preview is reconnecting.
+    if (measured === null || measured === undefined) {
       return '—';
     }
     return `${String(Math.round(measured))}FPS`;
-  }, [cameraState?.measuredFps, previewActive]);
+  }, [cameraState?.measuredFps]);
   const zoomLabel = `${(1 + (zoomLevel / 30)).toFixed(1)}X`;
   const recordingActive = Boolean(cameraState?.recording);
   const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';

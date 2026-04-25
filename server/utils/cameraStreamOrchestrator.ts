@@ -53,7 +53,13 @@ const cameraIpById = orchestratorState.cameraIpById;
 // If ingest hasn't received an RTP packet in this many ms while the camera is
 // supposed to be active, assume the Pi Zero pipeline died (reboot, crash) and
 // re-issue startVideoStream.
-const STREAM_STALL_THRESHOLD_MS = 8000;
+//
+// The threshold has to comfortably exceed the rpicam-vid cold-start cost on a
+// Pi Zero 2W: libcamera init + IPA tuning load + sensor mode select takes ~10s
+// before the first frame leaves the encoder. Setting this too low causes the
+// reconciler to re-kick the pipeline before it has finished warming up, which
+// produces an infinite stop/start loop. 20s gives enough slack on slow boots.
+const STREAM_STALL_THRESHOLD_MS = 20000;
 const RECONCILE_INTERVAL_MS = 4000;
 
 // Quality -> bitrate (bits per second). rpicam-vid --bitrate takes bps.

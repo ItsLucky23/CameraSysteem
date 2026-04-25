@@ -165,8 +165,11 @@ class VideoPublisher:
         bitrate_bps: int,
     ) -> str:
         # rpicam-vid drives the hardware encoder; ffmpeg handles RTP packetization only.
-        # Keyframe every ~1s for snappy WebRTC startup.
-        keyframe_interval = max(1, target_fps)
+        # target_fps == 0 means uncapped: omit --framerate so the sensor runs at its
+        # native max rate. Keyframe interval falls back to 30 (one keyframe per
+        # second at 30fps; close enough for WebRTC).
+        uncapped = target_fps <= 0
+        keyframe_interval = 30 if uncapped else max(1, target_fps)
 
         rpicam_args = [
             "rpicam-vid",
@@ -174,7 +177,10 @@ class VideoPublisher:
             "-t", "0",                              # run forever
             "--width", str(FRAME_WIDTH),
             "--height", str(FRAME_HEIGHT),
-            "--framerate", str(target_fps),
+        ]
+        if not uncapped:
+            rpicam_args.extend(["--framerate", str(target_fps)])
+        rpicam_args.extend([
             "--bitrate", str(bitrate_bps),
             "--codec", "h264",
             "--inline",                             # inline SPS/PPS so receiver can join mid-stream
@@ -182,7 +188,7 @@ class VideoPublisher:
             "--profile", "baseline",
             "--level", "4.2",
             "-o", "-",
-        ]
+        ])
 
         rtp_target = f"rtp://{rtp_host}:{rtp_port}?pkt_size=1200"
         # stdbuf -eL forces ffmpeg's stderr to be line-buffered. Without this,
