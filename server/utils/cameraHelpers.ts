@@ -1,5 +1,5 @@
 import redis from '../functions/redis';
-import { ioInstance } from '../sockets/socket';
+import { getIoInstance } from '../sockets/socket';
 
 type CameraAccessLike = {
   canPreview?: boolean;
@@ -128,6 +128,12 @@ export const emitCameraSyncEvent = ({
     ? (serverOutput as { cameraId: string }).cameraId
     : null;
   const tag = cameraId ? `[cam ${cameraId}]` : '[cam ?]';
+
+  //? Resolve through the globalThis singleton on every call. Reading the
+  //? imported binding once at module load gives us a stale null whenever HMR
+  //? re-imports cameraHelpers.ts before loadSocket() has populated the new
+  //? module's ioInstance.
+  const ioInstance = getIoInstance();
 
   if (!ioInstance) {
     //? Loud about this — if it ever fires it means the HTTP API runs in a

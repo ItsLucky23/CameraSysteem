@@ -94,6 +94,12 @@ class CameraNodeRuntime:
                 await self._sleep(self._settings.poll_error_backoff_ms)
                 continue
 
+            if commands:
+                actions = ", ".join(f"{c.action}/{c.command_id[:8]}" for c in commands)
+                logger.info("Command long-poll returned %d command(s): %s", len(commands), actions)
+            else:
+                logger.debug("Command long-poll returned no commands (idle timeout)")
+
             for command in commands:
                 result = await self._executor.execute(command)
                 await self._send_telemetry(command_result=result)
@@ -129,6 +135,15 @@ class CameraNodeRuntime:
         try:
             await self._api_client.ingest_telemetry(payload)
             self._last_telemetry_at = time.monotonic()
+            logger.info(
+                "Telemetry sent isOnline=%s mode=%s measuredFps=%s lastFrameAgeMs=%s temperatureC=%s cmdResult=%s",
+                state.is_online,
+                state.mode,
+                state.measured_fps,
+                state.last_frame_age_ms,
+                state.temperature_c,
+                f"{command_result.action}/{command_result.result}" if command_result else "-",
+            )
         except Pi5ApiError as error:
             logger.warning(
                 "Failed to send telemetry: %s (code=%s, status=%s)",

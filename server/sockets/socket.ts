@@ -39,7 +39,29 @@ export type syncMessage = {
   ignoreSelf?: boolean;
 }
 
-export let ioInstance: SocketIOServer | null = null;
+//? ioInstance has to live on globalThis. Otherwise HMR / split bundle loaders
+//? give the HTTP API path a different module instance than the one loadSocket()
+//? populated, so emit calls from API handlers see ioInstance as null and silently
+//? drop sync events. Symptom: cameras page FPS counter never updates because
+//? `cameraStateUpdated` is never delivered. Verified via the diagnostic log
+//? "ioInstance is null, dropping ..." in cameraHelpers.ts.
+const IO_SINGLETON_KEY = '__luckyStackSocketIoInstance__';
+const ioScope = globalThis as typeof globalThis & {
+  [IO_SINGLETON_KEY]?: SocketIOServer | null;
+};
+
+export const getIoInstance = (): SocketIOServer | null => {
+  return ioScope[IO_SINGLETON_KEY] ?? null;
+};
+
+const setIoInstance = (instance: SocketIOServer | null): void => {
+  ioScope[IO_SINGLETON_KEY] = instance;
+};
+
+//? Kept for backwards compatibility with existing imports that read this binding
+//? directly. Anything new should call getIoInstance() so it always sees the
+//? current singleton even after a hot reload of this module.
+export let ioInstance: SocketIOServer | null = getIoInstance();
 
 const getVisibleSocketRooms = (socket: any, token: string | null): string[] => {
   return Array.from(socket.rooms)
@@ -79,6 +101,7 @@ export default function loadSocket(httpServer: any) {
     maxHttpBufferSize: 5 * 1024 * 1024, // 5 MB
   });
 
+  setIoInstance(io);
   ioInstance = io;
 
   console.log('SocketIO server initialized', 'green');
