@@ -197,6 +197,18 @@ export const getCameraIngestLastPacketAt = (cameraId: string): number | null => 
   return ingest ? ingest.lastPacketAt : null;
 };
 
+// Used by the orchestrator's reconciler after it kicks the Pi Zero pipeline
+// without tearing down the ingest socket. Resetting lastPacketAt to "now"
+// gives the new pipeline a full STREAM_STALL_THRESHOLD_MS grace window before
+// the reconciler can fire again — otherwise we'd reissue stop+start every
+// reconcile tick until RTP actually starts arriving.
+export const markCameraIngestKicked = (cameraId: string): void => {
+  const ingest = ingestByCameraId.get(cameraId);
+  if (ingest) {
+    ingest.lastPacketAt = Date.now();
+  }
+};
+
 export const startCameraIngest = ({
   cameraId,
 }: {

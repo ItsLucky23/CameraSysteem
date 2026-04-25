@@ -185,7 +185,13 @@ class VideoPublisher:
         ]
 
         rtp_target = f"rtp://{rtp_host}:{rtp_port}?pkt_size=1200"
+        # stdbuf -eL forces ffmpeg's stderr to be line-buffered. Without this,
+        # libc block-buffers stderr when it isn't a tty, so progress lines and
+        # error messages pile up for tens of seconds before the drain task sees
+        # them — making it impossible to diagnose why the pipeline stops in
+        # real time.
         ffmpeg_args = [
+            "stdbuf", "-eL",
             "ffmpeg",
             "-hide_banner",
             "-loglevel", "warning",
@@ -249,16 +255,24 @@ class VideoPublisher:
 
             self._consume_stderr_line(text)
 
+        # Surface the exit code so we can tell the difference between SIGTERM
+        # (intentional stop), 0 (clean shutdown), and non-zero (crash).
+        return_code = process.returncode
         logger.info(
-            "VideoPublisher stderr drain ended: lines_seen=%s progress_lines=%s",
+            "VideoPublisher stderr drain ended: lines_seen=%s progress_lines=%s returncode=%s",
             lines_seen,
             progress_lines_seen,
+            return_code,
         )
 
     def _consume_stderr_line(self, text: str) -> None:
         # Progress lines look like "frame=123", "fps=30.00", "progress=continue".
         if "=" not in text:
-            logger.debug("video pipeline: %s", text)
+            # Non key=value lines are warnings/errors from rpicam-vid or ffmpeg.
+            # Logged at INFO so the cause of pipeline death (camera busy, V4L2
+            # error, RTP send failure, etc.) is visible without re-deploying
+            # at DEBUG level.
+            logger.info("video pipeline: %s", text)
             return
 
         key, _, value = text.partition("=")
@@ -282,5 +296,6 @@ class VideoPublisher:
                 return
             return
 
-        # Non-progress lines (warnings, info) just go to debug logs.
+        # Other key=value progress fields (bitrate=, total_size=, ...) are noisy
+        # but useful when diagnosing — leave at debug.
         logger.debug("video pipeline: %s", text)

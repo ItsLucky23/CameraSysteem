@@ -8,6 +8,7 @@ import {
   getCameraIngestLastPacketAt,
   getCameraIngestRtpPort,
   isCameraIngestRunning,
+  markCameraIngestKicked,
   startCameraIngest,
   stopCameraIngest,
 } from './cameraWebrtcBridge';
@@ -196,10 +197,70 @@ const deactivateCamera = async ({
   stopCameraIngest({ cameraId });
 };
 
+// Send stop+start to the Pi Zero without touching the ingest socket or any
+// connected WebRTC peers. Used by the reconciler so that a transient pipeline
+// stall on the Pi Zero doesn't drop everyone watching the camera — viewers see
+// a few seconds of frozen video instead of a connection drop + reconnect.
+const kickPiZeroStream = async ({
+  cameraId,
+  cameraIp,
+}: {
+  cameraId: string;
+  cameraIp: string;
+}): Promise<void> => {
+  const streamConfig = await fetchCameraStreamConfig(cameraId);
+  if (!streamConfig) {
+    console.error(`cameraStreamOrchestrator: kick aborted — no stream config for ${cameraId}`);
+    return;
+  }
+
+  const rtpPort = getCameraIngestRtpPort(cameraId);
+  if (rtpPort === null) {
+    console.warn(`cameraStreamOrchestrator: kick aborted — ingest socket gone for ${cameraId}`);
+    return;
+  }
+
+  const pi5LanIp = getPi5LanIp();
+  if (!pi5LanIp) {
+    console.warn(`cameraStreamOrchestrator: kick aborted — PI5_LAN_IP unset`);
+    return;
+  }
+
+  await tryCatch(async () => {
+    return enqueueCommand({
+      cameraIp,
+      cameraId,
+      commandId: randomUUID(),
+      action: 'stopVideoStream',
+      payload: {},
+      requestedByUserId: SYSTEM_USER_ID,
+    });
+  });
+
+  await tryCatch(async () => {
+    return enqueueCommand({
+      cameraIp,
+      cameraId,
+      commandId: randomUUID(),
+      action: 'startVideoStream',
+      payload: {
+        rtpHost: pi5LanIp,
+        rtpPort,
+        targetFps: streamConfig.targetFps,
+        bitrateBps: streamConfig.bitrateBps,
+      },
+      requestedByUserId: SYSTEM_USER_ID,
+    });
+  });
+
+  // Reset staleness window so we don't fire the kick again on the next tick
+  // before the new pipeline has had a chance to produce its first packet.
+  markCameraIngestKicked(cameraId);
+};
+
 // Self-healing: every RECONCILE_INTERVAL_MS, check each activated camera's
 // ingest for RTP liveness. If no packet has arrived in STREAM_STALL_THRESHOLD_MS
-// (Pi Zero rebooted, ffmpeg crashed, etc.), re-issue startVideoStream so the
-// user doesn't have to manually bounce the Pi 5 when the Pi Zero restarts.
+// (Pi Zero rebooted, ffmpeg crashed, etc.), kick the Pi Zero pipeline.
 const reconcileActiveStreams = async (): Promise<void> => {
   if (activatedCameraIds.size === 0) {
     return;
@@ -229,13 +290,10 @@ const reconcileActiveStreams = async (): Promise<void> => {
       continue;
     }
     console.warn(
-      `cameraStreamOrchestrator: stream stalled for ${cameraId} (>${String(STREAM_STALL_THRESHOLD_MS)}ms with no RTP) — re-issuing startVideoStream`,
+      `cameraStreamOrchestrator: stream stalled for ${cameraId} (>${String(STREAM_STALL_THRESHOLD_MS)}ms with no RTP) — kicking Pi Zero (preserving ingest+peers)`,
     );
-    // Drop + re-activate so fetchCameraStreamConfig runs with fresh DB values.
     // eslint-disable-next-line no-await-in-loop
-    await deactivateCamera({ cameraId, cameraIp });
-    // eslint-disable-next-line no-await-in-loop
-    await activateCamera({ cameraId, cameraIp });
+    await kickPiZeroStream({ cameraId, cameraIp });
   }
 };
 
