@@ -125,10 +125,25 @@ const activateCamera = async ({
   cameraIp: string;
 }): Promise<void> => {
   if (activatedCameraIds.has(cameraId)) {
-    console.log(`cameraStreamOrchestrator: activateCamera short-circuit — ${cameraId} already active`);
+    const lastPacketAt = getCameraIngestLastPacketAt(cameraId);
+    const ageMs = lastPacketAt === null ? null : Date.now() - lastPacketAt;
+    console.log(
+      `[cam ${cameraId}] activateCamera short-circuit — already active (lastPacketAgeMs=${String(ageMs)})`,
+    );
+    //? If we think the camera is active but RTP has been silent for longer
+    //? than the stall threshold, the Pi Zero almost certainly restarted while
+    //? we held its activation slot. Force-kick to recover instead of waiting
+    //? for the reconciler — this is the path that bites a user who restarts
+    //? their Pi Zero and then opens the cameras page within 20s.
+    if (ageMs !== null && ageMs > STREAM_STALL_THRESHOLD_MS) {
+      console.warn(
+        `[cam ${cameraId}] activateCamera detected stale ingest (${String(ageMs)}ms) — force-kicking Pi Zero`,
+      );
+      await kickPiZeroStream({ cameraId, cameraIp });
+    }
     return;
   }
-  console.log(`cameraStreamOrchestrator: activateCamera ${cameraId} (ip=${cameraIp})`);
+  console.log(`[cam ${cameraId}] activateCamera (ip=${cameraIp})`);
 
   const pi5LanIp = getPi5LanIp();
   if (!pi5LanIp) {

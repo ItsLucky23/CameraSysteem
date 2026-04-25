@@ -98,7 +98,9 @@ class CameraNodeRuntime:
                 actions = ", ".join(f"{c.action}/{c.command_id[:8]}" for c in commands)
                 logger.info("Command long-poll returned %d command(s): %s", len(commands), actions)
             else:
-                logger.debug("Command long-poll returned no commands (idle timeout)")
+                # Temporarily INFO so we can confirm the long-poll is actually
+                # cycling end-to-end. Drop back to DEBUG once verified.
+                logger.info("Command long-poll returned no commands (idle timeout)")
 
             for command in commands:
                 result = await self._executor.execute(command)

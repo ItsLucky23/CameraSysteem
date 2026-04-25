@@ -60,6 +60,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   }
 
   if (firstBatch.length > 0 || waitMs === 0) {
+    if (firstBatch.length > 0) {
+      const actions = firstBatch.map((c) => `${c.action}/${c.commandId.slice(0, 8)}`).join(', ');
+      console.log(`[node ${cameraIp}] long-poll fast-path returned ${String(firstBatch.length)} command(s): ${actions}`);
+    }
     return {
       status: 'success',
       cameraIp,
@@ -72,7 +76,8 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   //? cameraIp or the long-poll timeout elapses. The waiter resolves true when
   //? a publish wakes it (re-LPOP to drain) and false on timeout (return empty
   //? so the Pi Zero can reissue the request immediately).
-  await waitForCommandSignal({ cameraIp, timeoutMs: waitMs });
+  console.log(`[node ${cameraIp}] long-poll waiting up to ${String(waitMs)}ms`);
+  const wokenByPublish = await waitForCommandSignal({ cameraIp, timeoutMs: waitMs });
 
   const [secondPopError, secondBatch] = await tryCatch(async () => {
     return functions.cameraNode.getPendingCommands({ cameraIp, limit });
@@ -80,6 +85,13 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   if (secondPopError || !secondBatch) {
     return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 500 };
+  }
+
+  if (secondBatch.length > 0) {
+    const actions = secondBatch.map((c) => `${c.action}/${c.commandId.slice(0, 8)}`).join(', ');
+    console.log(`[node ${cameraIp}] long-poll wake (publish=${String(wokenByPublish)}) returned ${String(secondBatch.length)} command(s): ${actions}`);
+  } else {
+    console.log(`[node ${cameraIp}] long-poll timeout, no commands queued`);
   }
 
   return {
