@@ -45,6 +45,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._tilt_servo = None
         self._recording_process: asyncio.subprocess.Process | None = None
         self._video_publisher = VideoPublisher()
+        self._talkback_enabled = False
 
         self._state = CameraState(
             is_online=True,
@@ -56,6 +57,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             temperature_c=None,
             motion_detected=False,
             recording=False,
+            zoom_level=50,
         )
 
     async def startup(self) -> None:
@@ -129,6 +131,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             recording=self._state.recording,
             measured_fps=measured_fps,
             last_frame_age_ms=last_frame_age_ms,
+            zoom_level=self._state.zoom_level,
         )
 
     async def pan(self, delta: int) -> None:
@@ -186,6 +189,22 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
 
     async def stop_video_stream(self) -> None:
         await self._video_publisher.stop()
+
+    async def set_zoom(self, level: int) -> None:
+        try:
+            new_level = _clamp(int(level), 1, 100)
+            old_level = self._state.zoom_level
+            self._state.zoom_level = new_level
+            print(f"[adapter] set_zoom level={old_level} -> {new_level}")
+        except Exception as error:  # noqa: BLE001
+            print(f"[adapter] set_zoom failed: {error}")
+
+    async def set_talkback(self, enabled: bool) -> None:
+        try:
+            self._talkback_enabled = bool(enabled)
+            print(f"[adapter] set_talkback enabled={self._talkback_enabled}")
+        except Exception as error:  # noqa: BLE001
+            print(f"[adapter] set_talkback failed: {error}")
 
     async def _start_recording_process(self) -> None:
         if self._recording_process and self._recording_process.returncode is None:

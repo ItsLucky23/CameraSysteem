@@ -396,6 +396,27 @@
     "troubleshoot": "Diagnose",
     "viewFeed": "Feed bekijken"
   },
+  "recordings": {
+    "title": "Opnames",
+    "subtitle": "Opnames per camera, gegroepeerd per camera.",
+    "loading": "Opnames laden...",
+    "empty": "Geen camera's met opnametoegang.",
+    "startRecording": "Opname starten",
+    "stopRecording": "Opname stoppen",
+    "activeRecording": "Bezig met opnemen",
+    "noRecordings": "Nog geen opnames.",
+    "duration": "Duur",
+    "size": "Grootte",
+    "play": "Afspelen",
+    "close": "Sluiten",
+    "startedAt": "Gestart",
+    "stopReason": "Stopreden",
+    "confirmStop": "De actieve opname op deze camera stoppen?",
+    "confirmStart": "Een nieuwe opname op deze camera starten?",
+    "errorStartFailed": "Opname starten mislukt.",
+    "errorStopFailed": "Opname stoppen mislukt.",
+    "errorAccessDenied": "Je hebt geen besturingstoegang tot deze camera."
+  },
   "errorPage": {
     "goBack": "← Ga terug",
     "home": "Home",

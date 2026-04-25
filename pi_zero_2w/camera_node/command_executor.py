@@ -16,6 +16,10 @@ class CommandExecutor:
         self._ptz_step = max(1, ptz_step)
 
     async def execute(self, command: CameraCommand) -> CommandResult:
+        # Blank line before each [executor] line so the (executor + adapter)
+        # pair stands out in the journal stream.
+        print("")
+        print(f"[executor] action={command.action} payload={command.payload}")
         logger.info("Executing command %s (%s)", command.command_id, command.action)
 
         if not command.command_id or not command.action:
@@ -43,6 +47,18 @@ class CommandExecutor:
                 await self._adapter.set_recording(True)
             elif command.action == "recordStop":
                 await self._adapter.set_recording(False)
+            elif command.action == "zoomIn":
+                state = await self._adapter.get_state()
+                new_level = min(100, (state.zoom_level or 50) + 10)
+                await self._adapter.set_zoom(new_level)
+            elif command.action == "zoomOut":
+                state = await self._adapter.get_state()
+                new_level = max(1, (state.zoom_level or 50) - 10)
+                await self._adapter.set_zoom(new_level)
+            elif command.action == "talkbackOn":
+                await self._adapter.set_talkback(True)
+            elif command.action == "talkbackOff":
+                await self._adapter.set_talkback(False)
             elif command.action == "startVideoStream":
                 validation = _validate_start_video_stream(command.payload)
                 if validation is None:

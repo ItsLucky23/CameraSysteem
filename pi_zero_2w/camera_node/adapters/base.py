@@ -48,3 +48,11 @@ class HardwareAdapter(ABC):
     @abstractmethod
     async def stop_video_stream(self) -> None:
         """Stop the H.264 RTP stream to Pi 5."""
+
+    @abstractmethod
+    async def set_zoom(self, level: int) -> None:
+        """Set zoom level (1..100). Stub until real zoom hardware exists."""
+
+    @abstractmethod
+    async def set_talkback(self, enabled: bool) -> None:
+        """Toggle two-way audio. Stub until speaker hardware exists."""

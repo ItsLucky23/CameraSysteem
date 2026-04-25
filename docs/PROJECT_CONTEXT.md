@@ -156,8 +156,8 @@ When a user logs in, the system automatically kicks all previous sessions for th
   - `api/cameras/executeCameraCommand/v1`
   - `api/cameras/setIRMode/v1`
   - `api/cameras/setRecordingMode/v1`
-  - `api/cameras/getPendingNodeCommands/v1` (Pi Zero polling endpoint)
-  - `api/cameras/ingestNodeTelemetry/v1` (Pi Zero telemetry + command-result ingest)
+  - `api/cameras/getPendingNodeCommands/v1` (Pi Zero **long-poll** endpoint — server holds the request open up to `waitMs` (capped at 25s) via Redis pub/sub on `camera-node:commands`, replacing the prior 750ms HTTP polling loop)
+  - `api/cameras/ingestNodeTelemetry/v1` (Pi Zero telemetry + command-result ingest; carries `measuredFps` + `lastFrameAgeMs` from ffmpeg `-progress pipe:2`)
 - Added admin access API routes:
   - `api/admin/camera-access/getUserCameraAccessMatrix/v1`
   - `api/admin/camera-access/updateCameraAccess/v1`
@@ -176,11 +176,13 @@ When a user logs in, the system automatically kicks all previous sessions for th
 - Added `CAMERA_NODE_SHARED_SECRET` to `.env_template` and `.env.local_template`.
 - `CAMERA_WEBRTC_SIGNALING_URL` is now optional/deprecated for legacy setups; primary preview path handles offer/answer inside npm server.
 - Added Pi Zero runtime package in `pi_zero_2w/` (Python-based camera node worker):
-  - polls `api/cameras/getPendingNodeCommands/v1`
+  - long-polls `api/cameras/getPendingNodeCommands/v1` with `waitMs=25000` and a per-call HTTP timeout of 35s; re-issues immediately on response (commands or empty timeout)
   - identifies target camera queue by camera IP (stored in `Camera.ip`) + shared secret
   - executes PTZ/IR/record commands via adapter layer
+  - executes `startVideoStream` / `stopVideoStream` to drive a `rpicam-vid -> ffmpeg -> RTP/UDP` pipeline (`camera_node/video_publisher.py`)
   - supports SG90 pan/tilt servo control via `PAN_SERVO_GPIO_PIN` and `TILT_SERVO_GPIO_PIN`
-  - posts telemetry and command results to `api/cameras/ingestNodeTelemetry/v1`
+  - posts telemetry (5s heartbeat + on-change) and command results to `api/cameras/ingestNodeTelemetry/v1`; telemetry runs in its own asyncio task in parallel with the long-poll command loop
+  - stall watchdog logs WARN when frame production goes silent for >1s while the pipeline is running (rate-limited)
   - includes `.env.example`, `requirements.txt`, and `systemd/camera-node.service.template`
   - uses venv-first execution (`.venv/bin/python`) for both manual and systemd runs
 - Added frontend pages:

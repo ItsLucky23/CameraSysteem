@@ -19,6 +19,8 @@ class CameraState:
     # ffmpeg has not yet produced a stats line.
     measured_fps: float | None = None
     last_frame_age_ms: int | None = None
+    # Ephemeral zoom state owned by the adapter. None until adapter starts.
+    zoom_level: int | None = None
 
 
 @dataclass(slots=True)

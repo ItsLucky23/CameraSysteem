@@ -1,14 +1,14 @@
-# Parallel Work Plan: Boot Probes + Action Logging + Stubbed Buttons + Thumbnails + Live Dashboard/Admin + Capability Graying
+# Parallel Work Plan: Boot Probes + Action Logging + Stubbed Buttons + Thumbnails + Live Dashboard/Admin + Capability Graying + Recordings
 
 > Created 2026-04-25. Living document - update as work progresses.
 
-This is a multi-session work plan. The work is split across **three parallel AI sessions** (`AI 1`, `AI 2`, `AI 3`). Each AI owns a separate slice of the codebase with no overlapping files, so they can run concurrently in three Claude Code chats without merge conflicts.
+This is a multi-session work plan. The work is split across **four parallel AI sessions** (`AI 1`, `AI 2`, `AI 3`, `AI 4`). Each AI owns a separate slice of the codebase with no overlapping files, so they can run concurrently in four Claude Code chats without merge conflicts.
 
 To kick off a session, paste this into a fresh Claude chat:
 
 > Read `PARALLEL_WORK_PLAN.md`. You are AI N. Read your assigned files and the referenced context, then execute your steps.
 
-Replace `N` with `1`, `2`, or `3`.
+Replace `N` with `1`, `2`, `3`, or `4`.
 
 ---
 
@@ -33,7 +33,7 @@ Reference for deeper architecture (read on demand, not blanket):
 
 ## 1. Mission
 
-Five deliverables, in priority order:
+Seven deliverables, in priority order:
 
 1. **Boot-time hardware probe and service probe** (Pi Zero + Pi 5) - on startup, log a banner showing the detection result for every configured hardware component or service. Non-fatal: missing hardware logs FAIL but never crashes the process.
 2. **Action logging** - every UI-driven backend event gets a Pi 5 log line. Visual structure: blank line before each event, single-line section dividers around significant transitions.
@@ -41,6 +41,7 @@ Five deliverables, in priority order:
 4. **Thumbnails** - Pi Zero captures a 1280x720 JPEG every 30s (skipped while video stream is active), POSTs to Pi 5; Pi 5 holds it in memory and broadcasts via sync; dashboard and admin pages render it as a real `<img>`.
 5. **Real-time dashboard / admin values** - dashboard and admin pages subscribe to the existing `cameraStateUpdated/v1` sync (plus the new `thumbnailUpdated/v1`) so `isOnline`, `mode`, `recording`, `temperatureC`, `measuredFps`, `zoomLevel` update live without a refresh.
 6. **Capability graying** - the Pi Zero's boot probe results flow to Pi 5 (in every telemetry tick), are stored in memory per camera, and reach the frontend. The cameras page disables / grays out controls for hardware the camera does not have (no IR LED -> IR buttons grayed; no servos -> pan/tilt grayed; no microphone -> system audio grayed; no speaker -> talkback grayed; etc.).
+7. **Recordings (full feature)** - Pi 5 muxer subscribes to the existing werift RTP stream and writes mp4 files via `ffmpeg -c copy`. New `Recording` Prisma model. APIs to start, stop, list, and stream recordings. New `/recordings` page grouped by camera, gated on `canControl`. The existing record button on the cameras page is rewired to drive the new muxer. Recording auto-stops at 1 hour, on camera offline >60s, or on server shutdown. Recording continues even when nobody is watching the camera (the orchestrator force-keeps the stream active via a reservation mechanism).
 
 Plus a small standalone task: **offline watcher** that flips `isOnline=false` after 15s of telemetry silence.
 
@@ -78,6 +79,17 @@ These are the answers from the planning conversation. Do not re-litigate them.
 | Capability initial-load | `getCameraList/v1` and `admin/getCameraCatalog/v1` include `capabilities` per camera (or null when the Pi Zero has not yet reported - renders as "all features available", safe default that doesn't lock the user out). |
 | Capability frontend gating | Cameras page only. Each control combines capability with existing permission gate: `disabled={controlsDisabled || !camera.capabilities?.hasIR}` etc. Use existing tailwind `disabled:opacity-60` styling. Dashboard / admin do not gate; they're informational. |
 | Capability stub-button policy | Even though `zoomIn`/`zoomOut`/`talkback*` are stubs that print and no-op, the buttons are gated by capability. If a camera has no zoom or no speaker, those buttons gray out. The stub still works if invoked directly, but UI prevents accidental use. |
+| Recording capture | Pi 5 muxer. Subscribes to existing werift RTP via a new additive `subscribeRtp(cameraId, callback)` method on `cameraWebrtcBridge`. Pipes RTP packets into `ffmpeg -c copy -f mp4` which writes to disk. No re-encode. |
+| Recording storage | `./recordings/{cameraId}/{YYYY-MM-DD}/{HH-mm-ss-uuid}.mp4`. UUID suffix prevents path-guessing. Path stored on the `Recording` row. |
+| Recording auto-stop | Hardcoded 1 hour limit. Also stops on camera offline >60s, server shutdown, ffmpeg subprocess exit, manual stop, or no-RTP-for-60s. `stopReason` enum on the `Recording` row records which path. |
+| Recording lifecycle invariant | At most ONE in-progress recording per camera (`stoppedAt IS NULL`). Starting a recording on a camera that already has one returns the existing recording (idempotent). |
+| Recording stream activation | When a recording starts, AI 4 calls a new `addRecordingReservation(cameraId)` on `cameraStreamOrchestrator`. The orchestrator force-keeps the stream active regardless of `connectedSocketIds`. Released on stop. |
+| Recording auth | `canControl` per camera. List API returns only recordings for cameras the user can control. Stream endpoint validates session + canControl on every request. Admins see everything. |
+| Recording playback | HTTP route `GET /recordings/stream/:recordingId` with full HTTP Range support so `<video>` seeking works. The route is mounted directly in `server/server.ts` (not via the API system) because Range responses require raw HTTP. |
+| Recording UI | New page `src/recordings/page.tsx` at `/recordings`. Lists recordings grouped by camera. Each camera section shows the per-camera Start/Stop button (calls `setRecordingMode/v1` so behavior matches the cameras-page button), in-progress recording badge with elapsed time, and a list of past recordings each with a Play button (opens `<video>` inline) and metadata (started, duration, size). |
+| Recording-button unification | The existing record button on `src/cameras/page.tsx` and the new per-camera Start/Stop button on the recordings page both call the same `cameras/setRecordingMode/v1` API. AI 4 owns that API file (moved out of AI 2's lane) and rewires it to drive the muxer. The Pi Zero adapter's existing `set_recording` flag is still toggled (so telemetry still reports `mode=record` for UI dot/timer purposes). |
+| Recording schema change exception | AI 4 is permitted to edit `prisma/schema.prisma`. The user runs `npx prisma generate` and (for MongoDB) `npx prisma db push` as part of integration. This carves an exception out of the global "no prisma:* commands" rule. |
+| Recording deferred items | "Extend recording" button + maxHours config + extensions counter (per `SESSION_STATE.md` 4.2) - deferred to a follow-up session. Retention / auto-delete of old recordings - deferred. Multi-stream concurrent recording per camera - deferred. |
 
 ---
 
@@ -86,7 +98,7 @@ These are the answers from the planning conversation. Do not re-litigate them.
 Every AI must follow these or the parallel plan breaks down.
 
 1. **Stay in your lane.** Each AI has an exclusive file list in section 4. If you find you need to touch a file owned by another AI, stop and write a coordination note at the bottom of this file under "Cross-lane coordination" instead of editing the file.
-2. **Don't touch FPS-related files** unless your section explicitly lists them. The FPS path (`measuredFps`, `targetFps`, `quality`, `bitrateBps`, video stream RTP wiring, `cameraStreamOrchestrator` reconcile loop, `video_publisher.py`) is a separate, in-flight session. You may **read** these files but do not edit them.
+2. **Don't touch FPS-related files** unless your section explicitly lists them. The FPS path (`measuredFps`, `targetFps`, `quality`, `bitrateBps`, video stream RTP wiring, `cameraStreamOrchestrator` reconcile loop, `video_publisher.py`) is a separate, in-flight session. You may **read** these files but do not edit them. Two narrow exceptions: AI 1 may add a single `is_active()` helper to `video_publisher.py`, and AI 4 may add additive-only methods to `cameraWebrtcBridge.ts` (`subscribeRtp`) and `cameraStreamOrchestrator.ts` (recording reservations + one OR-condition in the existing reconcile check). Both exceptions are spelled out in the relevant lane sections; do NOT extend them.
 3. **Don't add emojis** anywhere - code, comments, log lines, banners. Use ASCII only.
 4. **Don't run terminal commands** that mutate state. Tell the user what to run. Reading-only commands are fine.
 5. **Do not run `npm run generateArtifacts`.** That is an integration step the user runs at the end.
@@ -323,7 +335,6 @@ server/utils/cameraCapabilityStore.ts          NEW
 server/server.ts                               EDIT (boot wiring only)
 src/cameras/_api/executeCameraCommand_v1.ts    EDIT (extend action union, [action] log)
 src/cameras/_api/setIRMode_v1.ts               EDIT ([action] log)
-src/cameras/_api/setRecordingMode_v1.ts        EDIT ([action] log)
 src/cameras/_api/ingestNodeTelemetry_v1.ts     EDIT (zoomLevel + [telemetry] log + broadcast to cameras-overview room)
 src/cameras/_api/webrtc/offer_v1.ts            EDIT ([action] log)
 src/cameras/_api/webrtc/close_v1.ts            EDIT ([action] log)
@@ -409,7 +420,6 @@ Do not refactor existing boot ordering - just append.
 Add a `console.log` line to each of:
 - `executeCameraCommand_v1.ts`
 - `setIRMode_v1.ts`
-- `setRecordingMode_v1.ts`
 - `webrtc/offer_v1.ts`
 - `webrtc/close_v1.ts`
 - `admin/_api/createCamera_v1.ts`
@@ -754,7 +764,269 @@ to section 7.
 
 ---
 
-### 4.4 Cross-lane contracts
+### 4.4 AI 4 - Recordings (Pi 5 muxer + Recordings page + Schema)
+
+You own the entire recording feature: schema, capture pipeline, APIs, page, and the rewiring of the existing record button. This is the largest single lane.
+
+#### File ownership
+
+```
+prisma/schema.prisma                              EDIT (add Recording model)
+server/utils/cameraRecordingManager.ts            NEW
+server/utils/cameraWebrtcBridge.ts                EDIT (additive: subscribeRtp method)
+server/utils/cameraStreamOrchestrator.ts          EDIT (additive: addRecordingReservation/removeRecordingReservation + reconcile check)
+server/server.ts                                  EDIT (append: muxer boot + mp4 streaming HTTP route)
+src/cameras/_api/setRecordingMode_v1.ts           EDIT (rewire to muxer + [action] log)
+src/cameras/_api/recording/start_v1.ts            NEW
+src/cameras/_api/recording/stop_v1.ts             NEW
+src/cameras/_api/recording/getList_v1.ts          NEW
+src/recordings/page.tsx                           NEW
+src/_locales/nl.json                              EDIT (recordings page strings)
+src/_locales/en.json                              EDIT
+src/_locales/de.json                              EDIT
+src/_locales/fr.json                              EDIT
+```
+
+Do not touch:
+- Any file in AI 1 / AI 2 / AI 3 lanes that is not listed above. Specifically: `src/cameras/page.tsx` is hands-off (the existing record button in that file is used as-is, untouched UI; you only rewire the API behind it).
+- `server/utils/cameraStreamOrchestrator.ts` beyond the additive reservation methods. Do NOT modify the existing reconcile loop, `connectedSocketIds`, or any FPS-related logic. Two additive method declarations + one boolean check inside the existing reconcile-eligibility expression. That is the entire change.
+- `server/utils/cameraWebrtcBridge.ts` beyond the additive `subscribeRtp(cameraId, callback)` method. Do NOT touch RTP packet parsing, peer fan-out, or any FPS / werift logic.
+
+#### Steps
+
+**Step 4.1 - Add the `Recording` model to `prisma/schema.prisma`.**
+
+```prisma
+enum RecordingStopReason {
+  manual
+  expired
+  cameraOffline
+  serverShutdown
+  noStream
+  ffmpegExit
+  error
+}
+
+model Recording {
+  id              String                @id @default(auto()) @map("_id") @db.ObjectId
+  cameraId        String                @db.ObjectId
+  camera          Camera                @relation(fields: [cameraId], references: [id])
+  startedAt       DateTime              @default(now())
+  stoppedAt       DateTime?
+  filePath        String
+  durationMs      Int?
+  fileSizeBytes   Int?
+  startedByUserId String                @db.ObjectId
+  startedBy       User                  @relation(fields: [startedByUserId], references: [id])
+  stopReason      RecordingStopReason?
+
+  @@index([cameraId, startedAt])
+}
+```
+
+Also add the back-relations on `Camera` and `User`:
+```prisma
+recordings Recording[]
+```
+
+The exact ObjectId / SQL mapping must follow the project's current Prisma provider (check `prisma/schema.prisma` first - if it's not MongoDB, drop the `@db.ObjectId` and `@map("_id")` and use the existing convention).
+
+**Step 4.2 - Recording manager.**
+
+Create `server/utils/cameraRecordingManager.ts`. Singleton on `globalThis` for HMR safety.
+
+State held in memory: `Map<cameraId, ActiveRecording>` where `ActiveRecording` carries the recording id, the ffmpeg subprocess handle, the RTP unsubscribe function, the auto-stop timer, the last-RTP-at timestamp, and the file path.
+
+Public API:
+- `startRecording({ cameraId, userId }): Promise<{ recordingId: string }>`
+  - Idempotency: if a recording is already active on this camera, return its id. Do NOT start a second muxer.
+  - Wraps everything in the project's `tryCatch` helper.
+  - Creates a `Recording` row with `startedAt=now`, `filePath=<computed>`, `stoppedAt=null`.
+  - Mkdir-p the storage path.
+  - Calls `addRecordingReservation(cameraId)` on the orchestrator.
+  - Spawns ffmpeg: `ffmpeg -loglevel warning -f rtp -i rtp://placeholder -c copy -f mp4 -movflags +faststart+frag_keyframe+empty_moov <filePath>` - actually the ffmpeg arg pattern for live RTP requires an SDP file. Use `-f rtp -i pipe:0` and pipe the RTP packets from the bridge subscription into ffmpeg's stdin. Confirm this works with werift's RTP packet bytes; if it does not, fall back to writing an SDP and reading from a UDP loopback socket.
+  - Subscribes to the bridge: `subscribeRtp(cameraId, (rtpPacketBytes) => ffmpeg.stdin.write(rtpPacketBytes))`. Stores the unsubscribe handle.
+  - Sets up auto-stop: `setTimeout(() => stopRecording(...), 60 * 60 * 1000)` (1 hour).
+  - Sets up no-RTP watchdog: every 5s, if no RTP for 60s, stop with reason `noStream`.
+  - Listens for ffmpeg exit; if it exits unexpectedly, stop with reason `ffmpegExit`.
+  - Logs: blank line, then `[recording] start cameraId=<id> recordingId=<id> userId=<u> filePath=<p>`.
+  - Returns `{ recordingId }`.
+- `stopRecording({ recordingId, reason: RecordingStopReason }): Promise<void>`
+  - Cancels the auto-stop timer and watchdog.
+  - Closes ffmpeg stdin (graceful) then waits up to 5s for the process to exit; force-kills after.
+  - Unsubscribes from the bridge.
+  - Calls `removeRecordingReservation(cameraId)`.
+  - Updates the `Recording` row with `stoppedAt=now`, `stopReason`, `durationMs`, `fileSizeBytes` (stat the file).
+  - Logs: blank line, then `[recording] stop recordingId=<id> reason=<r> durationMs=<n> bytes=<n>`.
+- `getActiveRecording(cameraId): { id: string; startedAt: Date } | null`
+- `stopAllOnShutdown(): Promise<void>` - called from server.ts shutdown hook. Stops every active recording with reason `serverShutdown`.
+
+Hook into the offline watcher (AI 2's file): the offline watcher will set `isOnline=false`. Provide an `onCameraOffline(cameraId)` listener API on the recording manager that the watcher could call - BUT do NOT edit AI 2's offline watcher file. Instead, AI 4's manager subscribes to `cameras/cameraStateUpdated/v1` sync and reacts to `isOnline=false`. After 60s of continuous offline, stop the recording with reason `cameraOffline`.
+
+**Step 4.3 - Bridge RTP subscription (additive).**
+
+In `server/utils/cameraWebrtcBridge.ts`, add ONE method (or pair: subscribe + unsubscribe). Find where existing peers are tracked and where each incoming RTP packet is fanned out. Add a `Set<RtpSubscriber>` per camera and call each subscriber's callback alongside the existing peer fan-out.
+
+```typescript
+subscribeRtp(cameraId: string, callback: (rtpBytes: Buffer) => void): () => void {
+  // returns unsubscribe function
+}
+```
+
+This is the ONLY change to this file. Do NOT modify any other logic.
+
+**Step 4.4 - Orchestrator reservations (additive).**
+
+In `server/utils/cameraStreamOrchestrator.ts`, add a `Set<string>` (or globalThis-scoped) called `recordingReservations`. Add two exported functions:
+
+```typescript
+export function addRecordingReservation(cameraId: string): void;
+export function removeRecordingReservation(cameraId: string): void;
+```
+
+Modify the existing reconcile / activation eligibility check so a camera is considered "should be active" when:
+```
+connectedSocketIds.has(...some socket for this camera...) || recordingReservations.has(cameraId)
+```
+
+Find the existing condition and add `|| recordingReservations.has(cameraId)`. That is the only edit to existing logic. Two new methods, one OR-condition. Nothing else.
+
+**Step 4.5 - Recording APIs.**
+
+Create `src/cameras/_api/recording/start_v1.ts`:
+- Auth: logged in + `canControl` on the camera (admin override).
+- Payload: `{ cameraId: string }`.
+- Calls `cameraRecordingManager.startRecording`.
+- Broadcasts a sync `cameras/recordingStatus/v1` (new sync, see step 4.6) with `{ cameraId, recordingId, startedAt, startedByUserId }`.
+- `[action]` log line.
+
+Create `src/cameras/_api/recording/stop_v1.ts`:
+- Auth: logged in + `canControl` on the camera (admin override).
+- Payload: `{ recordingId: string }`.
+- Calls `cameraRecordingManager.stopRecording({ reason: 'manual' })`.
+- Broadcasts `cameras/recordingStatus/v1` with `{ cameraId, recordingId: null }` to clear the in-progress badge.
+- `[action]` log line.
+
+Create `src/cameras/_api/recording/getList_v1.ts`:
+- Auth: logged in.
+- Returns recordings grouped by camera, but ONLY for cameras the user has `canControl` on (admins see all). Format:
+  ```typescript
+  { perCamera: Array<{ cameraId, cameraName, activeRecording: ActiveRecording | null, history: Recording[] }> }
+  ```
+- History list: most recent first. Limit to last 100 per camera for V1.
+
+**Step 4.6 - Recording status sync event.**
+
+Create `src/cameras/_sync/recordingStatus_server_v1.ts`. Server-only (no client file needed). Schema:
+```typescript
+interface ServerOutput {
+  status: 'success';
+  cameraId: string;
+  recordingId: string | null;     // null = no active recording
+  startedAt: string | null;
+  startedByUserId: string | null;
+}
+```
+
+Broadcast to both `camera-${cameraId}` (cameras page) and `cameras-overview` (dashboard / admin / recordings page) rooms.
+
+**Step 4.7 - Rewire the existing record button.**
+
+In `src/cameras/_api/setRecordingMode_v1.ts`:
+- Add `[action]` log at the top of the handler (one blank line before): `[action] cameras/setRecordingMode cameraId=... mode=... userId=...`
+- After the existing Pi Zero command enqueue (do NOT remove it; the Pi Zero `set_recording` flag should still be toggled so telemetry reports `mode=record` for the UI dot/timer):
+  - If `mode === 'record'`: call `cameraRecordingManager.startRecording({ cameraId, userId })`.
+  - If `mode === 'live'` (off): find the active recording for this camera; if any, call `cameraRecordingManager.stopRecording({ recordingId, reason: 'manual' })`.
+
+The cameras-page UI is unchanged. The user's existing flow now actually saves an mp4.
+
+**Step 4.8 - mp4 streaming HTTP route.**
+
+In `server/server.ts`, register a raw HTTP handler for `GET /recordings/stream/:recordingId`. This is NOT an API endpoint - it is a static-file route with HTTP Range support so the browser's `<video>` element can seek.
+
+- Validate the user's session (read the session cookie / token, look up the user).
+- Look up the `Recording` row by id. If not found, 404.
+- Look up the `CameraAccess` row for this user + this recording's camera. If not `canControl` and not admin, 403.
+- Read `Range` header. Honor it: respond `206 Partial Content` with the requested byte range and proper `Content-Range`, `Accept-Ranges`, `Content-Length` headers. If no Range: respond `200 OK` with full file.
+- `Content-Type: video/mp4`.
+- `Cache-Control: no-cache` (recordings are mutable - they are appended to while in progress).
+
+This route is mounted alongside any existing static handlers in `server.ts`. Append-only; do NOT refactor existing routing.
+
+**Step 4.9 - Recordings page.**
+
+Create `src/recordings/page.tsx`. Template: `home` (top bar with avatar). Per AI.md and `.claude/CLAUDE.md`, all UI text uses `useTranslator`, all colors use the theme tokens from `index.css`, all error handling uses the client `tryCatch` from `src/_functions/helper`.
+
+Layout:
+- Page title (translated key `recordings.title`).
+- Section per camera (only cameras the user has `canControl` on; server filters this).
+- Each section header: camera name, an active-recording badge (red dot + elapsed time) if the camera has an in-progress recording.
+- Two buttons per camera: `Start recording` (disabled when an active recording exists) and `Stop recording` (disabled when no active recording).
+- List of past recordings below each camera section: started time, duration, size, Play button.
+- Play button opens a modal or expands an inline `<video controls src="/recordings/stream/{recordingId}">` element.
+
+Subscribe to:
+- `cameras/recordingStatus/v1` on `cameras-overview` room - update the in-progress badge live.
+- `cameras/cameraStateUpdated/v1` on `cameras-overview` room - keep camera names / online state fresh.
+
+All buttons use the project's existing component library where possible (Dropdown, ConfirmMenu, Icon, etc. per `.claude/CLAUDE.md`).
+
+Locale keys to add (in nl, en, de, fr):
+- `recordings.title`
+- `recordings.startRecording`
+- `recordings.stopRecording`
+- `recordings.activeRecording`
+- `recordings.noRecordings`
+- `recordings.duration`
+- `recordings.size`
+- `recordings.play`
+- `recordings.startedAt`
+- `recordings.confirmStop`
+- `recordings.confirmStart`
+- `recordings.errorStartFailed`
+- `recordings.errorStopFailed`
+- `recordings.errorAccessDenied`
+- Reasonable Dutch / English / German / French translations.
+
+**Step 4.10 - Boot wiring.**
+
+In `server/server.ts`:
+- Append a call to `await cameraRecordingManager.init()` (if your manager needs init - if not, skip).
+- Append a shutdown hook that calls `await cameraRecordingManager.stopAllOnShutdown()` before the process exits. Use the existing graceful-shutdown signal handler if there is one; otherwise add a `process.on('SIGTERM', ...)` and `process.on('SIGINT', ...)` handler that calls it before letting the process exit.
+- Append the mp4 HTTP route registration from step 4.8.
+
+The append-only discipline keeps you out of AI 2's boot wiring.
+
+**Step 4.11 - Logging style polish.**
+
+Throughout all your code:
+- Blank line before each `[action]`, `[recording]` log line
+- `[recording]` prefix for manager logs (start, stop, stalled, ffmpeg exit, watchdog hit, etc.)
+- No emojis
+
+**Done criteria for AI 4.**
+
+- `Recording` model exists in schema.
+- Pressing the existing record button on the cameras page actually writes an mp4 file under `./recordings/...`.
+- Pressing the new Start button on the recordings page does the same.
+- Stop button stops cleanly. mp4 is playable.
+- Recording continues when the cameras page is closed (orchestrator reservation works).
+- Recording auto-stops after 1 hour, on camera offline >60s, on server shutdown, on ffmpeg exit, on no-RTP-for-60s.
+- Recordings page lists per-camera, gated by `canControl`.
+- Playback works inline in `<video>` element with seeking (Range support verified).
+- Locale strings added to all four language files.
+- No emojis, no `unsafe*` wrappers, no raw try/catch in TypeScript code.
+
+When done, append:
+```
+### AI 4 - Done
+<one-sentence summary>
+```
+to section 7.
+
+---
+
+### 4.5 Cross-lane contracts
 
 These are the interfaces between AIs. Match these names exactly so the three lanes line up.
 
@@ -785,6 +1057,26 @@ These are the interfaces between AIs. Match these names exactly so the three lan
 **Initial-load thumbnail field** (AI 2 adds + AI 3 reads):
 - `getCameraList/v1` (cameras page loader) and `admin/getCameraCatalog/v1` responses gain `thumbnail: { jpegBase64: string, capturedAt: string } | null` per camera.
 
+**Recording manager exports** (AI 4 produces, AI 4 self-consumes):
+- `cameraRecordingManager.startRecording({ cameraId, userId })`
+- `cameraRecordingManager.stopRecording({ recordingId, reason })`
+- `cameraRecordingManager.getActiveRecording(cameraId)`
+- `cameraRecordingManager.stopAllOnShutdown()`
+
+**Bridge subscribe API** (AI 4 adds, AI 4 self-consumes):
+- `cameraWebrtcBridge.subscribeRtp(cameraId, callback): unsubscribe`
+
+**Orchestrator reservation API** (AI 4 adds, AI 4 self-consumes):
+- `cameraStreamOrchestrator.addRecordingReservation(cameraId)`
+- `cameraStreamOrchestrator.removeRecordingReservation(cameraId)`
+
+**Recording status sync** (AI 4 emits):
+- `cameras/recordingStatus/v1` server output: `{ status: 'success', cameraId, recordingId | null, startedAt | null, startedByUserId | null }`. Broadcast to both `camera-${cameraId}` and `cameras-overview` rooms.
+
+**Recordings page route** (AI 4 owns): `/recordings`.
+
+**HTTP route** (AI 4 mounts): `GET /recordings/stream/:recordingId` with Range support.
+
 **Capabilities object** (AI 1 produces + AI 2 stores + AI 3 reads):
 - Telemetry payload key: `capabilities`
 - Shape: `{ hasCamera, hasIR, hasPanTilt, hasMicrophone, hasSpeaker, hasMotion, hasZoom, hasTemperature }` - all booleans, all required.
@@ -809,15 +1101,19 @@ These are the interfaces between AIs. Match these names exactly so the three lan
 
 ---
 
-## 5. Final integration (the user runs this, after all 3 AIs are done)
+## 5. Final integration (the user runs this, after all 4 AIs are done)
 
 Steps to run in order, as one human:
 
 ```
 On the development machine (Pi 5):
-[ ] git status   (confirm all 3 AIs' changes are committed or in working tree)
-[ ] npm run generateArtifacts   (regenerates apiTypes.generated.ts for the new actions + zoomLevel)
+[ ] git status   (confirm all 4 AIs' changes are committed or in working tree)
+[ ] which ffmpeg                (confirm ffmpeg is installed; required for AI 4's muxer)
+[ ] npx prisma generate         (regenerates Prisma client for the new Recording model)
+[ ] npx prisma db push          (MongoDB - applies the schema change)
+[ ] npm run generateArtifacts   (regenerates apiTypes.generated.ts for the new APIs / actions / zoomLevel / capabilities / recording routes)
 [ ] npm run lint                (must be clean)
+[ ] mkdir -p ./recordings       (storage directory for AI 4)
 [ ] Restart Pi 5 server
 
 On each Pi Zero:
@@ -825,7 +1121,7 @@ On each Pi Zero:
 [ ] Restart camera_node service
 ```
 
-Database: no migrations. No `prisma:generate` or `prisma db push` needed.
+Database: schema change is required this round (AI 4 adds the `Recording` model). The "no prisma:* commands" rule has an explicit exception for this plan.
 
 ---
 
@@ -916,9 +1212,34 @@ Live dashboard / admin values:
     indicator for that camera updates live.
 [ ] Temperature value shown on dashboard / admin updates per telemetry tick (~5s).
 
+Recordings:
+[ ] Database has the new `Recording` collection / table after `prisma db push`.
+[ ] Open the cameras page and click record on a camera that is currently being previewed.
+    Pi 5 log shows [recording] start cameraId=... recordingId=... and an mp4 file
+    appears under ./recordings/<cameraId>/<date>/.
+[ ] Wait ~10 seconds and click record again to stop. mp4 closes cleanly.
+    Pi 5 log shows [recording] stop recordingId=... reason=manual.
+[ ] Open the mp4 in VLC or browser - it plays.
+[ ] Open the new /recordings page. It shows your test recording grouped under the
+    correct camera. Click Play - inline `<video>` plays, seek bar works (Range support).
+[ ] Start a recording on a camera, then close the cameras page entirely. Confirm via
+    Pi 5 logs that the stream stays active (orchestrator reservation works) and the
+    mp4 file continues to grow. Reopen the page - recording is still in progress.
+[ ] Power off the Pi Zero while a recording is running. Wait ~60s. Pi 5 log shows
+    [recording] stop reason=cameraOffline and the mp4 closes.
+[ ] Start a recording, stop the Pi 5 server (graceful shutdown / SIGTERM). Pi 5 log
+    shows [recording] stop reason=serverShutdown. mp4 is finalized.
+[ ] Start a recording and wait. Confirm auto-stop triggers at the 1 hour mark with
+    reason=expired (this is a long test - skip if not needed).
+[ ] Try opening /recordings as a non-admin user with no canControl access. Page shows
+    no cameras. Try hitting GET /recordings/stream/<id> directly with a recording id
+    you don't have access to - returns 403.
+[ ] Start a second recording on the SAME camera while one is already in progress.
+    The API returns the existing recording id (idempotent), no second muxer starts.
+
 Visual log polish:
-[ ] Each [action], [telemetry], [executor]+[adapter], [offline-watcher], [thumbnail] event
-    has a blank line before it
+[ ] Each [action], [telemetry], [executor]+[adapter], [offline-watcher], [thumbnail],
+    [recording] event has a blank line before it
 [ ] Banners are surrounded by blank lines and use 60-char = and - separators
 [ ] No emojis anywhere in any log
 ```
@@ -930,13 +1251,16 @@ Visual log polish:
 Each AI fills this in when done.
 
 ### AI 1 - Done
-_(empty - awaiting completion)_
+Pi Zero now prints a hardware-probe boot banner, accepts zoomIn/zoomOut/talkbackOn/talkbackOff commands, reports zoomLevel + a capabilities object on every telemetry tick, and a thumbnail-publisher task POSTs a 1280x720 JPEG every 30s when the video pipeline is idle.
 
 ### AI 2 - Done
-_(empty - awaiting completion)_
+Pi 5 boot probe + offline watcher + `[action]` / `[telemetry]` / `[capabilities]` / `[thumbnail]` logging plus thumbnail and capability in-memory stores, sync schema extensions for `zoomLevel` + `capabilities`, dual broadcasts to `camera-${id}` and `cameras-overview`, and initial-load enrichment of `getCameraList` / `admin/getCameraCatalog`.
 
 ### AI 3 - Done
-_(empty - awaiting completion)_
+Cameras page rewired with step-based zoom buttons + server-driven zoom label, talkback mic / system-audio commands and `[ui]` log, capability gating across all controls; dashboard + admin subscribe to `cameraStateUpdated` and `thumbnailUpdated` on the new `cameras-overview` room and render real thumbnails (live + initial-load).
+
+### AI 4 - Done
+Recording feature shipped end-to-end: `Recording` schema, ffmpeg `-c copy` passthrough muxer using a UDP loopback hop + tmpfile SDP, additive `cameraWebrtcBridge.subscribeRtp`, additive `cameraStreamOrchestrator` recording reservations, `cameras/recording/{start,stop,getList}` APIs, server-only `recordingStatus` sync, new `/recordings` page (NL/EN/DE/FR), Range-aware `/recordings/stream/:id` HTTP route, shutdown hooks that flush in-progress mp4 files.
 
 ---
 

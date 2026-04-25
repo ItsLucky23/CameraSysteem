@@ -2,6 +2,7 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
 import { canControlCamera, emitCameraSyncEvent, getCameraRoomCode } from '../../../server/utils/cameraHelpers';
+import { cameraRecordingManager } from '../../../server/utils/cameraRecordingManager';
 
 export const rateLimit: number | false = 60;
 
@@ -24,6 +25,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   if (!cameraId || typeof data.recording !== 'boolean') {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
+
+  console.log('');
+  console.log(`[action] cameras/setRecordingMode cameraId=${cameraId} userId=${user.id} recording=${String(data.recording)}`);
 
   const [cameraFetchError, cameraFetchResult] = await tryCatch(async () => {
     return Promise.all([
@@ -117,6 +121,23 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       at: new Date().toISOString(),
     },
   });
+
+  // Drive the Pi 5 muxer. The Pi Zero `set_recording` flag is still toggled
+  // (so telemetry reports `mode=record` for the UI dot/timer), but the actual
+  // mp4 capture happens here on Pi 5 via cameraRecordingManager.
+  if (data.recording) {
+    const startResult = await cameraRecordingManager.startRecording({ cameraId, userId: user.id });
+    if (startResult.status === 'error') {
+      console.warn(
+        `[recording] setRecordingMode start returned error code=${startResult.errorCode} cameraId=${cameraId}`,
+      );
+    }
+  } else {
+    const active = cameraRecordingManager.getActiveRecording(cameraId);
+    if (active) {
+      await cameraRecordingManager.stopRecording({ recordingId: active.id, reason: 'manual' });
+    }
+  }
 
   return {
     status: 'success',

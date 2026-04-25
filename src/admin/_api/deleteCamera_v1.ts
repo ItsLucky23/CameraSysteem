@@ -18,12 +18,17 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const cameraId = data.cameraId.trim();
 
   if (!cameraId) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
+
+  console.log('');
+  console.log(
+    `[action] admin/deleteCamera cameraId=${cameraId} userId=${user.id}`,
+  );
 
   const [cameraReadError, existingCamera] = await tryCatch(async () => {
     return functions.db.prisma.camera.findUnique({

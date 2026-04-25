@@ -1,6 +1,6 @@
 # Camera Pi5 Tracker
 
-Last updated: 2026-04-23
+Last updated: 2026-04-25
 
 ## Purpose
 
@@ -33,7 +33,7 @@ This file tracks:
 ### Backend
 
 - Prisma camera domain models/enums:
-  - Camera
+  - Camera (now includes `targetFps Int @default(15)` and `quality QUALITY @default(medium)`)
   - CameraAccess
   - CameraCommand
   - CameraEvent
@@ -45,8 +45,8 @@ This file tracks:
   - api/cameras/executeCameraCommand/v1
   - api/cameras/setIRMode/v1
   - api/cameras/setRecordingMode/v1
-  - api/cameras/getPendingNodeCommands/v1
-  - api/cameras/ingestNodeTelemetry/v1
+  - api/cameras/getPendingNodeCommands/v1 — long-poll: server holds the request open up to `waitMs` (default 25s) via Redis pub/sub on the existing `camera-node:commands` channel, replacing the prior 750ms Pi-Zero polling loop
+  - api/cameras/ingestNodeTelemetry/v1 — now broadcasts `measuredFps` + `lastFrameAgeMs` (ephemeral; not persisted)
 - WebRTC offer API (npm server local bridge):
   - api/cameras/webrtc/offer/v1
   - validates preview token + camera access
@@ -62,6 +62,17 @@ This file tracks:
   - sync/admin/camera-access/userForcedLeaveCameraRoom/v1
 - Pi5 node bridge service:
   - Redis queue + pub/sub command dispatch in server/functions/cameraNode.ts
+  - `waitForCommandSignal({ cameraIp, timeoutMs })` parks per-cameraIp resolvers backed by a single shared Redis subscriber (`server/functions/redis.ts` exports `redisSubscriber`)
+- Stream orchestration:
+  - `server/utils/cameraStreamOrchestrator.ts` activates/deactivates Pi-Zero pipelines based on connected sockets
+  - `fetchCameraStreamConfig` reads `targetFps` + `quality` from the Camera document on every activation and warns when fields are missing (legacy MongoDB docs)
+  - quality -> bitrate mapping: `low=1Mbps`, `medium=2Mbps`, `high=4Mbps`
+  - 30s grace window before tearing down a Pi-Zero pipeline when the last viewer leaves
+  - 4s reconciler that detects >20s of zero RTP and re-issues `stopVideoStream` + `startVideoStream` without dropping the WebRTC peers
+  - On `activateCamera` short-circuit (already active), force-kicks the Pi Zero if ingest has been silent >20s — covers the "Pi Zero restarted while a viewer was on the page" recovery case
+- Socket reliability:
+  - `ioInstance` lives on `globalThis` so HMR / split-bundle module copies all see the same Socket.io server
+  - `io.on('connection')` rejoins every room recorded in `session.roomCodes` so reconnects don't silently lose `camera-<id>` membership
 - Preview session hardening:
   - Redis-stored short-lived preview tokens
 - Locale updates:
@@ -95,15 +106,27 @@ This file tracks:
 
 - Frontend lint (`npm run lint`) currently passes with zero errors after cache reset.
 
-## Next Phase (Pi Zero)
+## Pi Zero Implementation
 
-1. Implemented initial Pi Zero 2W runtime package in `pi_zero_2w/`:
-  - Python worker loop with command polling and telemetry ingest
-  - command executor for PTZ/IR/record actions
-  - adapters: mock + Raspberry Pi hardware hooks
+1. Pi Zero 2W runtime package in `pi_zero_2w/`:
+  - command executor for PTZ/IR/record + `startVideoStream` / `stopVideoStream`
+  - adapters: mock + Raspberry Pi hardware hooks (SG90 pan/tilt + GPIO IR)
   - deployment instructions, env template, and systemd service template
-  - PTZ motor model selected: Micro Servo 9g (SG90)
-2. Remaining:
-  - build the real video capture + WebRTC transport on the Pi Zero (architecture pending — see discussion; MJPEG test path has been removed)
-  - set and validate per-device GPIO pin mapping for SG90 pan/tilt servos
-  - add persistent health/watchdog metrics if required by ops
+2. Runtime architecture (April 2026):
+  - `_command_loop` and `_telemetry_loop` run as parallel asyncio tasks
+  - `get_pending_commands` long-polls Pi 5 with `waitMs=25000` and a per-call aiohttp timeout of 35s; on response (commands or empty) re-issues immediately. `POLL_INTERVAL_MS=0` by default; `POLL_ERROR_BACKOFF_MS=1500` only fires on Pi5ApiError
+  - `_telemetry_loop` heartbeats every `TELEMETRY_INTERVAL_SEC` (default 5s); command-result telemetry is sent inline by the command loop right after execute
+3. Video pipeline (`video_publisher.py`):
+  - `rpicam-vid -> ffmpeg -> RTP/UDP` to Pi 5 ingest port
+  - `target_fps == 0` (or any negative) means uncapped: `--framerate` flag is omitted so the sensor runs at native max
+  - quality is encoded as `--bitrate <bps>` derived from the Pi 5 mapping
+  - ffmpeg runs with `stdbuf -eL` for line-buffered stderr and `-progress pipe:2` for parseable telemetry
+  - Stall watchdog logs WARN every time frame production goes silent for >1s (rate-limited to one warn per 5s)
+  - Orphan-process sweep (`pkill -f rpicam-vid`, `pkill -f 'ffmpeg.*rtp'`) runs before each fresh `start()` in case a previous Python run exited without cleanup and left children reparented to PID 1
+4. Stream config flow:
+  - Pi 5 `enqueueCommand startVideoStream payload={ rtpHost, rtpPort, targetFps, bitrateBps }`
+  - Pi Zero `_validate_start_video_stream` accepts targetFps in `[0, 60]` and bitrateBps in `[100k, 20M]`
+5. Remaining:
+  - validate per-device GPIO pin mapping for SG90 pan/tilt servos in production
+  - persistent health/watchdog metrics if required by ops
+  - drop the temporary INFO log on idle long-poll completion back to DEBUG once verified in production

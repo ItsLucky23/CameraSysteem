@@ -7,6 +7,7 @@ import {
   emitCameraSyncEvent,
   getCameraRoomCode,
   isCameraAction,
+  isStubCameraAction,
 } from '../../../server/utils/cameraHelpers';
 
 export const rateLimit: number | false = 90;
@@ -46,6 +47,68 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   const payload = data.payload ?? {};
   const roomCode = getCameraRoomCode(cameraId);
+
+  console.log('');
+  console.log(
+    `[action] cameras/executeCameraCommand cameraId=${cameraId} userId=${user.id} action=${actionValue} payload=${JSON.stringify(payload)}`,
+  );
+
+  if (isStubCameraAction(actionValue)) {
+    const [stubFetchError, stubCamera] = await tryCatch(async () => {
+      return Promise.all([
+        functions.db.prisma.camera.findUnique({
+          where: { id: cameraId },
+          select: { id: true, ip: true },
+        }),
+        user.admin
+          ? Promise.resolve(null)
+          : functions.db.prisma.cameraAccess.findUnique({
+            where: {
+              cameraId_userId: { cameraId, userId: user.id },
+            },
+          }),
+      ]);
+    });
+
+    if (stubFetchError || !stubCamera) {
+      return { status: 'error', errorCode: 'camera.commandFailed', httpStatus: 500 };
+    }
+
+    const [stubCameraRow, stubAccess] = stubCamera;
+    if (!stubCameraRow) {
+      return { status: 'error', errorCode: 'camera.notFound', httpStatus: 404 };
+    }
+
+    if (!canControlCamera({ isAdmin: user.admin, access: stubAccess })) {
+      return { status: 'error', errorCode: 'camera.controlDenied', httpStatus: 403 };
+    }
+
+    const [stubDispatchError, stubDispatchResult] = await tryCatch(async () => {
+      return functions.cameraNode.enqueueCommand({
+        cameraIp: stubCameraRow.ip,
+        cameraId,
+        commandId,
+        action: actionValue,
+        payload,
+        requestedByUserId: user.id,
+      });
+    });
+
+    if (stubDispatchError || !stubDispatchResult?.queued) {
+      return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 503 };
+    }
+
+    return {
+      status: 'success',
+      command: {
+        commandId,
+        cameraId,
+        action: actionValue,
+        status: 'accepted',
+        lockUntil: new Date().toISOString(),
+      },
+    };
+  }
 
   const [existingCommandError, existingCommand] = await tryCatch(async () => {
     return functions.db.prisma.cameraCommand.findUnique({ where: { commandId } });

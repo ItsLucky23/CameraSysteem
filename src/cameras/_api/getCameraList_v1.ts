@@ -1,6 +1,9 @@
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
+import { getThumbnail } from '../../../server/utils/cameraThumbnailStore';
+import { getCapabilities, Capabilities } from '../../../server/utils/cameraCapabilityStore';
+import { cameraRecordingManager } from '../../../server/utils/cameraRecordingManager';
 
 export const rateLimit: number | false = 120;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
@@ -15,6 +18,31 @@ export interface ApiParams {
   user: SessionLayout;
   functions: Functions;
 }
+
+const buildThumbnail = (cameraId: string): { jpegBase64: string; capturedAt: string } | null => {
+  const stored = getThumbnail(cameraId);
+  if (!stored) return null;
+  return {
+    jpegBase64: stored.jpegBase64,
+    capturedAt: stored.capturedAt.toISOString(),
+  };
+};
+
+const buildCapabilities = (cameraId: string): Capabilities | null => {
+  return getCapabilities(cameraId);
+};
+
+// Seeds the recording indicator on initial page load. recordingStatus sync
+// only fires on transitions, so without this a user opening a page mid-
+// recording would have to wait for the next start/stop event to see it.
+const buildActiveRecording = (cameraId: string): { recordingId: string; startedAt: string } | null => {
+  const active = cameraRecordingManager.getActiveRecording(cameraId);
+  if (!active) return null;
+  return {
+    recordingId: active.id,
+    startedAt: active.startedAt.toISOString(),
+  };
+};
 
 export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse> => {
   if (user.admin) {
@@ -52,6 +80,9 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         canPreview: true,
         canControl: true,
         lastSeenAt: camera.lastSeenAt ? camera.lastSeenAt.toISOString() : null,
+        thumbnail: buildThumbnail(camera.id),
+        capabilities: buildCapabilities(camera.id),
+        activeRecording: buildActiveRecording(camera.id),
       })),
     };
   }
@@ -105,6 +136,9 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
       canPreview: accessRow.canPreview,
       canControl: accessRow.canControl,
       lastSeenAt: accessRow.camera.lastSeenAt ? accessRow.camera.lastSeenAt.toISOString() : null,
+      thumbnail: buildThumbnail(accessRow.camera.id),
+      capabilities: buildCapabilities(accessRow.camera.id),
+      activeRecording: buildActiveRecording(accessRow.camera.id),
     })),
   };
 };

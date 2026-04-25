@@ -1,6 +1,9 @@
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
+import { getThumbnail } from '../../../server/utils/cameraThumbnailStore';
+import { getCapabilities } from '../../../server/utils/cameraCapabilityStore';
+import { cameraRecordingManager } from '../../../server/utils/cameraRecordingManager';
 
 export const rateLimit: number | false = 60;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET';
@@ -44,18 +47,29 @@ export const main = async ({ functions }: ApiParams): Promise<ApiResponse> => {
 
   return {
     status: 'success',
-    cameras: cameras.map((camera) => ({
-      id: camera.id,
-      slug: camera.slug,
-      name: camera.name,
-      cameraIp: camera.ip,
-      isOnline: camera.isOnline,
-      mode: camera.mode,
-      targetFps: camera.targetFps,
-      quality: camera.quality,
-      lastSeenAt: camera.lastSeenAt ? camera.lastSeenAt.toISOString() : null,
-      createdAt: camera.createdAt.toISOString(),
-      updatedAt: camera.updatedAt.toISOString(),
-    })),
+    cameras: cameras.map((camera) => {
+      const stored = getThumbnail(camera.id);
+      const active = cameraRecordingManager.getActiveRecording(camera.id);
+      return {
+        id: camera.id,
+        slug: camera.slug,
+        name: camera.name,
+        cameraIp: camera.ip,
+        isOnline: camera.isOnline,
+        mode: camera.mode,
+        targetFps: camera.targetFps,
+        quality: camera.quality,
+        lastSeenAt: camera.lastSeenAt ? camera.lastSeenAt.toISOString() : null,
+        createdAt: camera.createdAt.toISOString(),
+        updatedAt: camera.updatedAt.toISOString(),
+        thumbnail: stored
+          ? { jpegBase64: stored.jpegBase64, capturedAt: stored.capturedAt.toISOString() }
+          : null,
+        capabilities: getCapabilities(camera.id),
+        activeRecording: active
+          ? { recordingId: active.id, startedAt: active.startedAt.toISOString() }
+          : null,
+      };
+    }),
   };
 };

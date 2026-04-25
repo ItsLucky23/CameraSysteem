@@ -87,6 +87,32 @@ class Pi5ApiClient:
             data=payload,
         )
 
+    async def upload_thumbnail(
+        self,
+        *,
+        camera_ip: str,
+        node_secret: str,
+        captured_at_iso: str,
+        jpeg_base64: str,
+        camera_id: str | None = None,
+    ) -> None:
+        # Auth pattern matches ingestNodeTelemetry: body-level cameraIp + nodeSecret.
+        # cameraId is included opportunistically (cached from observed commands) so
+        # the Pi 5 can use it directly when present.
+        body: dict[str, Any] = {
+            "cameraIp": camera_ip,
+            "nodeSecret": node_secret,
+            "capturedAt": captured_at_iso,
+            "jpegBase64": jpeg_base64,
+        }
+        if camera_id:
+            body["cameraId"] = camera_id
+
+        await self._post(
+            endpoint="/api/cameras/uploadThumbnail/v1",
+            data=body,
+        )
+
     async def _post(
         self,
         *,

@@ -15,9 +15,26 @@ export const CAMERA_ACTIONS = [
   'irOff',
   'recordStart',
   'recordStop',
+  'zoomIn',
+  'zoomOut',
+  'talkbackOn',
+  'talkbackOff',
 ] as const;
 
 export type CameraAction = (typeof CAMERA_ACTIONS)[number];
+
+//? Stub actions exist on the Pi Zero (print + ephemeral state) but have no
+//? matching enum value in the Prisma CAMERA_ACTION enum. The plan forbids
+//? schema changes in this lane, so the API skips DB persistence + locking
+//? for these and just enqueues the command for the Pi Zero to consume.
+export const STUB_CAMERA_ACTIONS = [
+  'zoomIn',
+  'zoomOut',
+  'talkbackOn',
+  'talkbackOff',
+] as const;
+
+export type StubCameraAction = (typeof STUB_CAMERA_ACTIONS)[number];
 
 const projectPrefix = process.env.PROJECT_NAME ? `${process.env.PROJECT_NAME}-` : '';
 
@@ -35,6 +52,10 @@ export const getActiveUserTokensKey = (userId: string): string => `${projectPref
 
 export const isCameraAction = (value: string): value is CameraAction => {
   return CAMERA_ACTIONS.includes(value as CameraAction);
+};
+
+export const isStubCameraAction = (value: string): value is StubCameraAction => {
+  return STUB_CAMERA_ACTIONS.includes(value as StubCameraAction);
 };
 
 export const canPreviewCamera = ({

@@ -2,6 +2,12 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
 import { emitCameraSyncEvent, getCameraRoomCode } from '../../../server/utils/cameraHelpers';
+import {
+  capabilitiesEqual,
+  getCapabilities,
+  setCapabilities,
+  Capabilities,
+} from '../../../server/utils/cameraCapabilityStore';
 
 export const rateLimit: number | false = 480;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -31,6 +37,17 @@ export interface ApiParams {
     recording?: boolean;
     measuredFps?: number | null;
     lastFrameAgeMs?: number | null;
+    zoomLevel?: number | null;
+    capabilities?: {
+      hasCamera: boolean;
+      hasIR: boolean;
+      hasPanTilt: boolean;
+      hasMicrophone: boolean;
+      hasSpeaker: boolean;
+      hasMotion: boolean;
+      hasZoom: boolean;
+      hasTemperature: boolean;
+    };
     commandResult?: {
       commandId: string;
       action: string;
@@ -54,6 +71,21 @@ const isCommandResultStatus = (value: unknown): value is CommandResultStatus => 
   return value === 'executed' || value === 'failed' || value === 'rejected';
 };
 
+const isCapabilities = (value: unknown): value is Capabilities => {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.hasCamera === 'boolean'
+    && typeof v.hasIR === 'boolean'
+    && typeof v.hasPanTilt === 'boolean'
+    && typeof v.hasMicrophone === 'boolean'
+    && typeof v.hasSpeaker === 'boolean'
+    && typeof v.hasMotion === 'boolean'
+    && typeof v.hasZoom === 'boolean'
+    && typeof v.hasTemperature === 'boolean'
+  );
+};
+
 interface CameraStatePatch {
   mode?: CameraMode;
   irMode?: IRMode;
@@ -65,13 +97,17 @@ interface CameraStatePatch {
   motionDetected?: boolean;
   measuredFps?: number | null;
   lastFrameAgeMs?: number | null;
+  zoomLevel?: number | null;
+  capabilities?: Capabilities | null;
   isOnline: boolean;
 }
 
 const buildCameraPatch = ({
   data,
+  capabilities,
 }: {
   data: ApiParams['data'];
+  capabilities: Capabilities | null;
 }): CameraStatePatch => {
   const patch: CameraStatePatch = {
     isOnline: data.isOnline,
@@ -106,6 +142,12 @@ const buildCameraPatch = ({
   }
   if (data.lastFrameAgeMs !== undefined) {
     patch.lastFrameAgeMs = data.lastFrameAgeMs;
+  }
+  if (data.zoomLevel !== undefined) {
+    patch.zoomLevel = data.zoomLevel;
+  }
+  if (capabilities !== null) {
+    patch.capabilities = capabilities;
   }
 
   return patch;
@@ -168,6 +210,19 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
+  if (data.zoomLevel !== undefined && data.zoomLevel !== null) {
+    if (typeof data.zoomLevel !== 'number'
+      || !Number.isFinite(data.zoomLevel)
+      || data.zoomLevel < 1
+      || data.zoomLevel > 100) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+  }
+
+  if (data.capabilities !== undefined && !isCapabilities(data.capabilities)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
   if (data.commandResult !== undefined) {
     const commandResult = data.commandResult;
 
@@ -205,9 +260,27 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   const cameraId = camera.id;
 
+  console.log('');
   console.log(
-    `[cam ${cameraId}] telemetry received ip=${cameraIp} isOnline=${String(data.isOnline)} mode=${String(data.mode ?? '-')} measuredFps=${String(data.measuredFps ?? '-')} lastFrameAgeMs=${String(data.lastFrameAgeMs ?? '-')} temperatureC=${String(data.temperatureC ?? '-')} cmdResult=${data.commandResult ? `${data.commandResult.action}/${data.commandResult.result}` : '-'}`,
+    `[telemetry] ingest cameraId=${cameraId} online=${String(data.isOnline)} fps=${String(data.measuredFps ?? '-')} temp=${String(data.temperatureC ?? '-')} zoom=${String(data.zoomLevel ?? '-')}`,
   );
+
+  // Capability persistence + change-detection log. Telemetry sends the report
+  // every tick for self-healing on Pi 5 restart, but capabilities don't change
+  // at runtime — only log on first-seen-after-boot or on a real change so the
+  // log stream stays readable.
+  let storedCapabilities: Capabilities | null = getCapabilities(cameraId);
+  if (data.capabilities !== undefined) {
+    const incoming = data.capabilities;
+    if (!capabilitiesEqual(storedCapabilities, incoming)) {
+      console.log('');
+      console.log(
+        `[capabilities] cameraId=${cameraId} hasCamera=${String(incoming.hasCamera)} hasIR=${String(incoming.hasIR)} hasPanTilt=${String(incoming.hasPanTilt)} hasMicrophone=${String(incoming.hasMicrophone)} hasSpeaker=${String(incoming.hasSpeaker)} hasMotion=${String(incoming.hasMotion)} hasZoom=${String(incoming.hasZoom)} hasTemperature=${String(incoming.hasTemperature)}`,
+      );
+    }
+    setCapabilities(cameraId, incoming);
+    storedCapabilities = incoming;
+  }
 
   const modeFromRecording: CameraMode | undefined = typeof data.recording === 'boolean'
     ? (data.recording ? 'record' : 'live')
@@ -316,7 +389,8 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     });
   }
 
-  const statePatch = buildCameraPatch({ data });
+  const statePatch = buildCameraPatch({ data, capabilities: storedCapabilities });
+  const stateAtIso = new Date().toISOString();
 
   emitCameraSyncEvent({
     fullName: 'sync/cameras/cameraStateUpdated/v1',
@@ -325,7 +399,18 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
       status: 'success',
       cameraId,
       patch: statePatch,
-      at: new Date().toISOString(),
+      at: stateAtIso,
+    },
+  });
+
+  emitCameraSyncEvent({
+    fullName: 'sync/cameras/cameraStateUpdated/v1',
+    receiver: 'cameras-overview',
+    serverOutput: {
+      status: 'success',
+      cameraId,
+      patch: statePatch,
+      at: stateAtIso,
     },
   });
 

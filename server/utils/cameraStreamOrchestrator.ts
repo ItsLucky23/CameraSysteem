@@ -29,6 +29,10 @@ interface OrchestratorSingletonState {
   // sub-second drops. We schedule a deferred deactivation and cancel it if a
   // socket reconnects within the grace window.
   pendingDeactivationTimer: ReturnType<typeof globalThis.setTimeout> | null;
+  // Cameras with an in-progress recording. The orchestrator force-keeps the
+  // stream active as long as a reservation is held, even if no browser sockets
+  // are connected.
+  recordingReservations: Set<string>;
 }
 
 const ORCHESTRATOR_SINGLETON_KEY = '__luckyStackCameraStreamOrchestratorState__';
@@ -43,7 +47,14 @@ const orchestratorState: OrchestratorSingletonState = orchestratorScope[ORCHESTR
   reconcileTimer: null,
   cameraIpById: new Map<string, string>(),
   pendingDeactivationTimer: null,
+  recordingReservations: new Set<string>(),
 };
+
+// Backfill on HMR: an existing singleton from before this field was added
+// won't carry recordingReservations, so initialize it lazily.
+if (!orchestratorState.recordingReservations) {
+  orchestratorState.recordingReservations = new Set<string>();
+}
 
 if (!orchestratorScope[ORCHESTRATOR_SINGLETON_KEY]) {
   orchestratorScope[ORCHESTRATOR_SINGLETON_KEY] = orchestratorState;
@@ -55,6 +66,7 @@ const activatedCameraIds = orchestratorState.activatedCameraIds;
 // Remembers the IP each activated camera was started with, so the reconciler
 // can re-enqueue startVideoStream without another DB lookup.
 const cameraIpById = orchestratorState.cameraIpById;
+const recordingReservations = orchestratorState.recordingReservations;
 
 // If ingest hasn't received an RTP packet in this many ms while the camera is
 // supposed to be active, assume the Pi Zero pipeline died (reboot, crash) and
@@ -94,7 +106,7 @@ const getPi5LanIp = (): string | null => {
 
 const fetchCameraStreamConfig = async (
   cameraId: string,
-): Promise<{ targetFps: number; bitrateBps: number } | null> => {
+): Promise<{ targetFps: number; bitrateBps: number; quality: string } | null> => {
   const [fetchError, camera] = await tryCatch(async () => {
     return prisma.camera.findUnique({
       where: { id: cameraId },
@@ -106,13 +118,31 @@ const fetchCameraStreamConfig = async (
     return null;
   }
 
-  // MongoDB docs created before the schema added these fields won't carry them.
-  // Fall back to the schema defaults so the stream still starts.
-  const targetFps = typeof camera.targetFps === 'number' ? camera.targetFps : 15;
-  const quality = camera.quality ?? 'medium';
+  //? MongoDB docs created before the schema added these fields won't carry
+  //? them. Falling back silently was the pre-existing source of "the camera
+  //? doesn't use my admin-configured fps/quality" reports — the doc literally
+  //? doesn't have the field, so we returned 15/medium without any signal.
+  //? Now we warn loudly so the operator knows the doc needs to be updated.
+  const hasTargetFps = typeof camera.targetFps === 'number';
+  const hasQuality = typeof camera.quality === 'string' && camera.quality.length > 0;
+  const targetFps = hasTargetFps ? (camera.targetFps as number) : 15;
+  const quality = hasQuality ? (camera.quality as string) : 'medium';
+
+  if (!hasTargetFps || !hasQuality) {
+    console.warn(
+      `[cam ${cameraId}] DB stream config missing fields — using fallback. ` +
+      `hasTargetFps=${String(hasTargetFps)} hasQuality=${String(hasQuality)}. ` +
+      `Open admin and re-save this camera so the document gets the targetFps + quality fields persisted.`,
+    );
+  }
+
+  console.log(
+    `[cam ${cameraId}] DB stream config -> targetFps=${String(targetFps)} quality=${quality} bitrateBps=${String(resolveBitrateBps(quality))}`,
+  );
 
   return {
     targetFps,
+    quality,
     bitrateBps: resolveBitrateBps(quality),
   };
 };
@@ -359,7 +389,10 @@ const activateAllEnabledCameras = async (): Promise<void> => {
 };
 
 const deactivateAllCameras = async (): Promise<void> => {
-  const activeIds = Array.from(activatedCameraIds);
+  // Cameras that still have a recording reservation keep the stream live even
+  // when no browser is connected. This is the single OR-condition added for
+  // the recording feature: should-stay-active = has-socket || has-reservation.
+  const activeIds = Array.from(activatedCameraIds).filter((cameraId) => !recordingReservations.has(cameraId));
   if (activeIds.length === 0) {
     return;
   }
@@ -506,4 +539,81 @@ export const onCameraStreamConfigChanged = async ({
 
   await deactivateCamera({ cameraId, cameraIp });
   await activateCamera({ cameraId, cameraIp });
+};
+
+// Called by the recording manager when a recording is about to start. Marks
+// the camera as eligible-to-stream regardless of socket count. Pure flag flip:
+// the recording manager pairs this with ensureCameraActive to actually start
+// the Pi Zero pipeline.
+export const addRecordingReservation = (cameraId: string): void => {
+  recordingReservations.add(cameraId);
+};
+
+// Cancel a pending grace-window deactivation and (if needed) start the Pi
+// Zero stream so the recording sees RTP within the standard cold-start
+// window. Idempotent: if the camera is already active, this is a no-op apart
+// from the cancelled deactivation.
+export const ensureCameraActive = async (cameraId: string): Promise<void> => {
+  if (orchestratorState.pendingDeactivationTimer !== null) {
+    globalThis.clearTimeout(orchestratorState.pendingDeactivationTimer);
+    orchestratorState.pendingDeactivationTimer = null;
+    console.log(
+      `cameraStreamOrchestrator: cancelled pending deactivation for ${cameraId}`,
+    );
+  }
+
+  if (activatedCameraIds.has(cameraId)) {
+    return;
+  }
+
+  const cachedIp = cameraIpById.get(cameraId);
+  if (cachedIp) {
+    await activateCamera({ cameraId, cameraIp: cachedIp });
+    return;
+  }
+
+  // Cold-start path: camera hasn't been activated since Pi 5 boot, so the IP
+  // isn't cached yet. Look it up from the DB.
+  const [fetchError, camera] = await tryCatch(async () => {
+    return prisma.camera.findUnique({ where: { id: cameraId }, select: { ip: true } });
+  });
+  if (fetchError || !camera) {
+    console.error(
+      `cameraStreamOrchestrator: ensureCameraActive could not look up IP for ${cameraId}`,
+      fetchError,
+    );
+    return;
+  }
+  await activateCamera({ cameraId, cameraIp: camera.ip });
+};
+
+// Called by the recording manager when a recording stops. Removes the
+// reservation. Does NOT proactively deactivate — if browser sockets are still
+// connected the camera stays active; if not, the next deactivate sweep
+// (already scheduled or fired by the next disconnect) tears it down.
+export const removeRecordingReservation = (cameraId: string): void => {
+  if (!recordingReservations.delete(cameraId)) {
+    return;
+  }
+
+  // Reservation released. If no sockets are connected, schedule the standard
+  // grace-window deactivation so we don't keep the Pi Zero pipeline running
+  // forever after a recording finishes with nobody watching.
+  if (connectedSocketIds.size > 0 || recordingReservations.size > 0) {
+    return;
+  }
+
+  if (orchestratorState.pendingDeactivationTimer !== null) {
+    globalThis.clearTimeout(orchestratorState.pendingDeactivationTimer);
+  }
+  console.log(
+    `cameraStreamOrchestrator: last recording reservation released — deferring deactivation by ${String(SOCKET_DEACTIVATION_GRACE_MS)}ms`,
+  );
+  orchestratorState.pendingDeactivationTimer = globalThis.setTimeout(() => {
+    orchestratorState.pendingDeactivationTimer = null;
+    if (connectedSocketIds.size > 0 || recordingReservations.size > 0) {
+      return;
+    }
+    void deactivateAllCameras();
+  }, SOCKET_DEACTIVATION_GRACE_MS);
 };

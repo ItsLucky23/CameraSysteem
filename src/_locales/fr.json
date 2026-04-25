@@ -396,6 +396,27 @@
     "troubleshoot": "Diagnostic",
     "viewFeed": "Voir le flux"
   },
+  "recordings": {
+    "title": "Enregistrements",
+    "subtitle": "Enregistrements par camera, groupes par camera.",
+    "loading": "Chargement des enregistrements...",
+    "empty": "Aucune camera avec acces aux enregistrements.",
+    "startRecording": "Demarrer l'enregistrement",
+    "stopRecording": "Arreter l'enregistrement",
+    "activeRecording": "Enregistrement en cours",
+    "noRecordings": "Aucun enregistrement pour le moment.",
+    "duration": "Duree",
+    "size": "Taille",
+    "play": "Lire",
+    "close": "Fermer",
+    "startedAt": "Debut",
+    "stopReason": "Raison de l'arret",
+    "confirmStop": "Arreter l'enregistrement actif sur cette camera ?",
+    "confirmStart": "Demarrer un nouvel enregistrement sur cette camera ?",
+    "errorStartFailed": "Impossible de demarrer l'enregistrement.",
+    "errorStopFailed": "Impossible d'arreter l'enregistrement.",
+    "errorAccessDenied": "Vous n'avez pas l'acces de controle sur cette camera."
+  },
   "errorPage": {
     "goBack": "← Retour",
     "home": "Accueil",

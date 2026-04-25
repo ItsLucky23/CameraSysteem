@@ -22,6 +22,7 @@ import { extractTokenFromRequest } from './utils/extractTokenFromRequest';
 import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 import { checkRateLimit } from './utils/rateLimiter';
+import { RECORDING_STREAM_PATH_PREFIX, serveRecording } from './utils/serveRecording';
 
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
 const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
@@ -239,6 +240,13 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     }
     return res.end();
 
+    //? Raw HTTP route for recording playback. Mounted directly here (not via
+    //? the API system) because mp4 streaming requires HTTP Range support and
+    //? a streamed response body, which the JSON-shaped API pipeline cannot
+    //? express. Auth + canControl are validated inside serveRecording.
+  } else if (routePath.startsWith(RECORDING_STREAM_PATH_PREFIX)) {
+    return serveRecording(req, res, routePath);
+
     //? HTTP API route - allows calling APIs via HTTP instead of WebSocket
     //? Supports: GET/POST/PUT/DELETE /api/{name}
   } else if (routePath.startsWith('/api/')) {
@@ -384,6 +392,27 @@ const port: string = process.env.SERVER_PORT || '80';
   // Clear any stale Pi Zero stream state left over from a previous Pi 5 instance.
   const { broadcastStreamStopOnBoot } = await import('./utils/cameraStreamOrchestrator');
   void broadcastStreamStopOnBoot();
+
+  const { startCameraOfflineWatcher } = await import('./utils/cameraOfflineWatcher');
+  startCameraOfflineWatcher();
+
+  const { runBootProbe } = await import('./utils/bootProbe');
+  await runBootProbe();
+
+  // Recording manager: graceful shutdown so any in-progress mp4 files get the
+  // moov atom flushed (otherwise the file is unplayable). Hooked off SIGINT
+  // and SIGTERM. We import lazily so dev hot-reload still works without
+  // pulling the manager into the import graph at module-evaluation time.
+  const handleShutdownSignal = (signal: string): void => {
+    void (async () => {
+      console.log(`[recording] received ${signal} — stopping all active recordings`);
+      const { cameraRecordingManager } = await import('./utils/cameraRecordingManager');
+      await cameraRecordingManager.stopAllOnShutdown();
+      process.exit(0);
+    })();
+  };
+  process.on('SIGINT', () => handleShutdownSignal('SIGINT'));
+  process.on('SIGTERM', () => handleShutdownSignal('SIGTERM'));
 
   // @ts-ignore // typescript thinks ip needs to be a number
   httpServer.listen(port, ip, () => {

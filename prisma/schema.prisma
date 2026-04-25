@@ -76,6 +76,7 @@ model User {
 
   cameraAccessRules CameraAccess[]
   cameraCommands    CameraCommand[]
+  recordings        Recording[]
 
   @@map("users")
 }
@@ -103,6 +104,7 @@ model Camera {
   commands     CameraCommand[]
   events       CameraEvent[]
   snapshots    CameraStateSnapshot[]
+  recordings   Recording[]
 
   @@map("cameras")
   @@index([ip])
@@ -166,6 +168,24 @@ model CameraEvent {
   @@index([type, createdAt])
 }
 
+model Recording {
+  id              String                @id @default(uuid()) @map("_id")
+  cameraId        String
+  startedAt       DateTime              @default(now())
+  stoppedAt       DateTime?
+  filePath        String
+  durationMs      Int?
+  fileSizeBytes   Int?
+  startedByUserId String
+  stopReason      RecordingStopReason?
+
+  camera          Camera                @relation(fields: [cameraId], references: [id], onDelete: Cascade)
+  startedBy       User                  @relation(fields: [startedByUserId], references: [id])
+
+  @@map("recordings")
+  @@index([cameraId, startedAt])
+}
+
 model CameraStateSnapshot {
   id             String      @id @default(uuid()) @map("_id")
   cameraId       String
@@ -222,6 +242,16 @@ enum COMMAND_STATUS {
   rejected
   executed
   failed
+}
+
+enum RecordingStopReason {
+  manual
+  expired
+  cameraOffline
+  serverShutdown
+  noStream
+  ffmpegExit
+  error
 }
 
 enum CAMERA_EVENT_TYPE {

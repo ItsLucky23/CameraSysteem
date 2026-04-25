@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
 
 from camera_node.adapters.base import HardwareAdapter
 from camera_node.api_client import Pi5ApiClient, Pi5ApiError
+from camera_node.boot_probe import CapabilityReport, run_hardware_probe
 from camera_node.command_executor import CommandExecutor
 from camera_node.config import NodeSettings
 from camera_node.models import CommandResult
 from camera_node.telemetry import read_cpu_temperature_c, to_ingest_payload
+from camera_node.thumbnail_publisher import ThumbnailPublisher
 
 
 logger = logging.getLogger(__name__)
@@ -30,13 +33,30 @@ class CameraNodeRuntime:
         self._executor = executor
         self._running = True
         self._last_telemetry_at = 0.0
+        self._capabilities: CapabilityReport | None = None
+        self._thumbnail_publisher: ThumbnailPublisher | None = None
 
     def request_stop(self) -> None:
         self._running = False
+        if self._thumbnail_publisher is not None:
+            self._thumbnail_publisher.request_stop()
 
     async def run(self) -> None:
         logger.info("Starting camera node runtime for camera IP %s", self._settings.camera_ip)
         await self._adapter.startup()
+
+        # Boot probe runs once after the adapter has had a chance to wire its
+        # GPIO devices. Failure modes are logged in the banner; we never
+        # crash on a missing component.
+        try:
+            self._capabilities = run_hardware_probe(
+                self._adapter,
+                camera_id=self._settings.camera_ip,
+                hostname=socket.gethostname(),
+            )
+        except Exception as error:  # noqa: BLE001
+            logger.warning("Boot probe raised unexpectedly: %s", error)
+            self._capabilities = None
 
         try:
             async with self._api_client:
@@ -44,15 +64,23 @@ class CameraNodeRuntime:
                 # and keep retrying instead of crashing the process.
                 await self._send_telemetry(command_result=None)
 
+                self._thumbnail_publisher = ThumbnailPublisher(
+                    api_client=self._api_client,
+                    is_video_active=self._is_video_active,
+                    camera_ip=self._settings.camera_ip,
+                    node_secret=self._settings.node_secret,
+                )
+
                 # Long-polling on commands can hold the request open up to 25s,
                 # so command and telemetry loops have to run in parallel — a
                 # single sequential loop would either starve telemetry (if it
                 # waits for commands) or burn cycles (if it polls).
                 command_task = asyncio.create_task(self._command_loop())
                 telemetry_task = asyncio.create_task(self._telemetry_loop())
+                thumbnail_task = asyncio.create_task(self._thumbnail_publisher.run())
 
                 done, pending = await asyncio.wait(
-                    {command_task, telemetry_task},
+                    {command_task, telemetry_task, thumbnail_task},
                     return_when=asyncio.FIRST_EXCEPTION,
                 )
 
@@ -69,6 +97,15 @@ class CameraNodeRuntime:
         finally:
             await self._adapter.shutdown()
             logger.info("Camera node runtime stopped")
+
+    def _is_video_active(self) -> bool:
+        publisher = getattr(self._adapter, "_video_publisher", None)
+        if publisher is None:
+            return False
+        is_active = getattr(publisher, "is_active", None)
+        if not callable(is_active):
+            return False
+        return bool(is_active())
 
     async def _command_loop(self) -> None:
         while self._running:
@@ -103,6 +140,11 @@ class CameraNodeRuntime:
                 logger.info("Command long-poll returned no commands (idle timeout)")
 
             for command in commands:
+                # Cache the cameraId observed on commands so the thumbnail
+                # upload can carry it. Pi Zero config only knows cameraIp.
+                if self._thumbnail_publisher is not None and command.camera_id:
+                    self._thumbnail_publisher.remember_camera_id(command.camera_id)
+
                 result = await self._executor.execute(command)
                 await self._send_telemetry(command_result=result)
 
@@ -132,18 +174,20 @@ class CameraNodeRuntime:
             node_secret=self._settings.node_secret,
             state=state,
             command_result=command_result,
+            capabilities=self._capabilities,
         )
 
         try:
             await self._api_client.ingest_telemetry(payload)
             self._last_telemetry_at = time.monotonic()
             logger.info(
-                "Telemetry sent isOnline=%s mode=%s measuredFps=%s lastFrameAgeMs=%s temperatureC=%s cmdResult=%s",
+                "Telemetry sent isOnline=%s mode=%s measuredFps=%s lastFrameAgeMs=%s temperatureC=%s zoomLevel=%s cmdResult=%s",
                 state.is_online,
                 state.mode,
                 state.measured_fps,
                 state.last_frame_age_ms,
                 state.temperature_c,
+                state.zoom_level,
                 f"{command_result.action}/{command_result.result}" if command_result else "-",
             )
         except Pi5ApiError as error:

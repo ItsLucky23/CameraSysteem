@@ -396,6 +396,27 @@
     "troubleshoot": "Diagnose",
     "viewFeed": "Feed ansehen"
   },
+  "recordings": {
+    "title": "Aufnahmen",
+    "subtitle": "Aufnahmen pro Kamera, nach Kamera gruppiert.",
+    "loading": "Aufnahmen werden geladen...",
+    "empty": "Keine Kameras mit Aufnahmezugriff.",
+    "startRecording": "Aufnahme starten",
+    "stopRecording": "Aufnahme stoppen",
+    "activeRecording": "Aufnahme läuft",
+    "noRecordings": "Noch keine Aufnahmen.",
+    "duration": "Dauer",
+    "size": "Größe",
+    "play": "Abspielen",
+    "close": "Schließen",
+    "startedAt": "Gestartet",
+    "stopReason": "Stoppgrund",
+    "confirmStop": "Die aktive Aufnahme auf dieser Kamera stoppen?",
+    "confirmStart": "Eine neue Aufnahme auf dieser Kamera starten?",
+    "errorStartFailed": "Aufnahme konnte nicht gestartet werden.",
+    "errorStopFailed": "Aufnahme konnte nicht gestoppt werden.",
+    "errorAccessDenied": "Sie haben keinen Steuerungszugriff auf diese Kamera."
+  },
   "errorPage": {
     "goBack": "← Zurück",
     "home": "Startseite",

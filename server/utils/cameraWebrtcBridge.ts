@@ -30,11 +30,17 @@ interface ForwardPeer {
   dispose: () => void;
 }
 
+type RtpSubscriber = (rtpBytes: Buffer) => void;
+
 interface CameraIngest {
   cameraId: string;
   rtpPort: number;
   socket: Socket;
   peers: Set<ForwardPeer>;
+  // Additive subscriber set used by the recording manager (and any other
+  // server-side consumer) to receive the raw RTP packet bytes without joining
+  // the WebRTC peer fan-out path.
+  rtpSubscribers: Set<RtpSubscriber>;
   // Updated on every received RTP packet so the orchestrator can detect Pi
   // Zero pipeline death (reboot, ffmpeg crash, network blip) and re-send
   // startVideoStream without requiring a manual Pi 5 restart.
@@ -151,6 +157,23 @@ const attachRtpForwarder = (ingest: CameraIngest): void => {
       );
     }
 
+    // Fan out raw RTP bytes to any non-WebRTC subscribers (e.g. recording
+    // muxer). Done before the peer fan-out so a slow/broken subscriber cannot
+    // block packet delivery to peers; each subscriber callback is wrapped
+    // independently so a single throwing subscriber doesn't kill the others.
+    if (ingest.rtpSubscribers.size > 0) {
+      for (const subscriber of ingest.rtpSubscribers) {
+        try {
+          subscriber(msg);
+        } catch (subscriberError) {
+          console.error(
+            `cameraWebrtcBridge[${ingest.cameraId}] rtp subscriber threw`,
+            subscriberError,
+          );
+        }
+      }
+    }
+
     if (ingest.peers.size === 0) {
       return;
     }
@@ -197,6 +220,28 @@ export const getCameraIngestLastPacketAt = (cameraId: string): number | null => 
   return ingest ? ingest.lastPacketAt : null;
 };
 
+// Subscribe to raw RTP packet bytes for a given camera. Returns an unsubscribe
+// function. If the ingest socket is later torn down (e.g. last viewer leaves
+// and no recording reservation is active), the subscriber set is cleared and
+// the unsubscribe function is a no-op.
+export const subscribeRtp = (
+  cameraId: string,
+  callback: (rtpBytes: Buffer) => void,
+): (() => void) => {
+  const ingest = ingestByCameraId.get(cameraId);
+  if (!ingest) {
+    return () => {
+      /* no ingest to unsubscribe from */
+    };
+  }
+  ingest.rtpSubscribers.add(callback);
+  return () => {
+    const current = ingestByCameraId.get(cameraId);
+    if (!current) return;
+    current.rtpSubscribers.delete(callback);
+  };
+};
+
 // Used by the orchestrator's reconciler after it kicks the Pi Zero pipeline
 // without tearing down the ingest socket. Resetting lastPacketAt to "now"
 // gives the new pipeline a full STREAM_STALL_THRESHOLD_MS grace window before
@@ -227,6 +272,7 @@ export const startCameraIngest = ({
     rtpPort,
     socket,
     peers: new Set(),
+    rtpSubscribers: new Set(),
     lastPacketAt: null,
   };
 
@@ -257,6 +303,9 @@ export const stopCameraIngest = ({
     void tryCatch(async () => peer.peerConnection.close());
   }
   ingest.peers.clear();
+  // Drop any RTP subscribers along with the ingest socket. Subscribers see no
+  // further callbacks until they re-subscribe against a fresh ingest.
+  ingest.rtpSubscribers.clear();
 
   try {
     ingest.socket.close();

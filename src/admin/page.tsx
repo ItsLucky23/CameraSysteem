@@ -5,11 +5,18 @@ import notify from 'src/_functions/notify';
 import Dropdown from 'src/_components/Dropdown';
 import Icon from 'src/_components/Icon';
 import { useTranslator } from 'src/_functions/translator';
+import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
+import { useSyncEvents } from 'src/_sockets/syncRequest';
 import tryCatch from 'shared/tryCatch';
 
 export const template = 'ops';
 
 type Quality = 'low' | 'medium' | 'high';
+
+interface CatalogThumbnail {
+  jpegBase64: string;
+  capturedAt: string;
+}
 
 interface CameraCatalogItem {
   id: string;
@@ -23,12 +30,21 @@ interface CameraCatalogItem {
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
+  thumbnail: CatalogThumbnail | null;
+  activeRecording: { recordingId: string; startedAt: string } | null;
+}
+
+interface ThumbnailEntry {
+  jpegBase64: string;
+  capturedAt: string;
 }
 
 interface CameraViewModel {
   camera: CameraCatalogItem;
   previewSource: string;
+  thumbnailSource: string | null;
   isOffline: boolean;
+  isRecording: boolean;
   uptime: string;
   latencyMs: number;
 }
@@ -93,18 +109,6 @@ const getDeterministicLatency = (cameraId: string): number => {
   return (hash % 80) + 18;
 };
 
-const getDeterministicUptimeMs = (cameraId: string): number => {
-  const base = cameraId
-    .split('')
-    .reduce((value, char) => value + char.charCodeAt(0), 0);
-
-  const days = (base % 12) + 1;
-  const hours = base % 24;
-  const minutes = base % 59;
-
-  return (((days * 24) + hours) * 60 + minutes) * 60 * 1000;
-};
-
 const formatDuration = (durationMs: number): string => {
   const safe = Math.max(0, durationMs);
   const totalMinutes = Math.floor(safe / 60000);
@@ -117,11 +121,14 @@ const formatDuration = (durationMs: number): string => {
 
 export default function AdminPage() {
   const translate = useTranslator();
+  const { upsertSyncEventCallback } = useSyncEvents();
 
   const [loadingCatalog, setLoadingCatalog] = useState<boolean>(true);
   const [savingCamera, setSavingCamera] = useState<boolean>(false);
   const [deletingCamera, setDeletingCamera] = useState<boolean>(false);
   const [cameraCatalog, setCameraCatalog] = useState<CameraCatalogItem[]>([]);
+  const [thumbnails, setThumbnails] = useState<Map<string, ThumbnailEntry>>(new Map());
+  const [recordingCameraIds, setRecordingCameraIds] = useState<Set<string>>(new Set());
 
   const [cameraFilter, setCameraFilter] = useState<CameraFilter>('all');
 
@@ -217,21 +224,25 @@ export default function AdminPage() {
   const cameraViewModels = useMemo<CameraViewModel[]>(() => {
     return filteredCameraCatalog.map((camera, index) => {
       const parsedLastSeenAt = camera.lastSeenAt ? Date.parse(camera.lastSeenAt) : Number.NaN;
-      const uptimeMs = Number.isFinite(parsedLastSeenAt)
-        ? Date.now() - parsedLastSeenAt
-        : getDeterministicUptimeMs(camera.id);
+      const hasLastSeen = Number.isFinite(parsedLastSeenAt);
+      const uptimeMs = hasLastSeen ? Date.now() - parsedLastSeenAt : 0;
 
       const isOffline = !camera.isOnline;
+      const isRecording = recordingCameraIds.has(camera.id);
+      const thumbnail = thumbnails.get(camera.id);
+      const thumbnailSource = thumbnail ? `data:image/jpeg;base64,${thumbnail.jpegBase64}` : null;
 
       return {
         camera,
         previewSource: cameraPreviewSources[index % cameraPreviewSources.length],
+        thumbnailSource,
         isOffline,
-        uptime: isOffline ? '--' : formatDuration(uptimeMs),
+        isRecording,
+        uptime: isOffline || !hasLastSeen ? '--' : formatDuration(uptimeMs),
         latencyMs: getDeterministicLatency(camera.id),
       };
     });
-  }, [filteredCameraCatalog]);
+  }, [filteredCameraCatalog, thumbnails, recordingCameraIds]);
 
   const authorizedHeaders = useCallback((): Record<string, string> => {
     if (!sessionBasedToken) {
@@ -284,12 +295,101 @@ export default function AdminPage() {
     }
 
     setCameraCatalog(parsedBody.cameras);
+    setThumbnails((previous) => {
+      const next = new Map(previous);
+      for (const camera of parsedBody.cameras) {
+        if (camera.thumbnail) {
+          next.set(camera.id, {
+            jpegBase64: camera.thumbnail.jpegBase64,
+            capturedAt: camera.thumbnail.capturedAt,
+          });
+        }
+      }
+      return next;
+    });
+    setRecordingCameraIds(() => {
+      const next = new Set<string>();
+      for (const camera of parsedBody.cameras) {
+        if (camera.activeRecording) {
+          next.add(camera.id);
+        }
+      }
+      return next;
+    });
     setLoadingCatalog(false);
   }, [authorizedHeaders]);
 
   useEffect(() => {
     void fetchCameraCatalog();
   }, [fetchCameraCatalog]);
+
+  useEffect(() => {
+    const roomCode = 'cameras-overview';
+    void joinRoom(roomCode);
+
+    return () => {
+      void leaveRoom(roomCode);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribeState = upsertSyncEventCallback({
+      name: 'cameras/cameraStateUpdated',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setCameraCatalog((previous) => {
+          return previous.map((camera) => {
+            if (camera.id !== serverOutput.cameraId) {
+              return camera;
+            }
+
+            return {
+              ...camera,
+              ...(typeof serverOutput.patch.isOnline === 'boolean' ? { isOnline: serverOutput.patch.isOnline } : {}),
+              ...(serverOutput.patch.mode === undefined ? {} : { mode: serverOutput.patch.mode }),
+            };
+          });
+        });
+      },
+    });
+
+    const unsubscribeThumbnail = upsertSyncEventCallback({
+      name: 'cameras/thumbnailUpdated',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setThumbnails((previous) => {
+          const next = new Map(previous);
+          next.set(serverOutput.cameraId, {
+            jpegBase64: serverOutput.jpegBase64,
+            capturedAt: serverOutput.capturedAt,
+          });
+          return next;
+        });
+      },
+    });
+
+    const unsubscribeRecording = upsertSyncEventCallback({
+      name: 'cameras/recordingStatus',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setRecordingCameraIds((previous) => {
+          const next = new Set(previous);
+          if (serverOutput.recordingId) {
+            next.add(serverOutput.cameraId);
+          } else {
+            next.delete(serverOutput.cameraId);
+          }
+          return next;
+        });
+      },
+    });
+
+    return () => {
+      unsubscribeState();
+      unsubscribeThumbnail();
+      unsubscribeRecording();
+    };
+  }, [upsertSyncEventCallback]);
 
   const createCamera = useCallback(async () => {
     const payload = {
@@ -572,7 +672,7 @@ export default function AdminPage() {
                   >
                     <div className="flex items-center gap-3">
                       <div className="relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-container2-border bg-container2">
-                        <img alt="" className={`h-full w-full object-cover ${item.isOffline ? 'grayscale opacity-65' : ''}`} src={item.previewSource} />
+                        <img alt="" className={`h-full w-full object-cover ${item.isOffline ? 'grayscale opacity-65' : ''}`} src={item.thumbnailSource ?? item.previewSource} />
                         {!item.isOffline && (
                           <div className="absolute left-1 top-1 rounded bg-title/80 px-1 text-[8px] font-bold uppercase tracking-wide text-background">
                             {translate({ key: 'dashboard.live' })}
@@ -722,7 +822,7 @@ export default function AdminPage() {
                     type="button"
                   >
                     <div className="relative h-28 w-full overflow-hidden rounded-xl border border-container2-border bg-container2 md:w-48">
-                      <img alt="" className={`h-full w-full object-cover transition-all ${item.isOffline ? 'grayscale opacity-60' : 'grayscale group-hover:grayscale-0'}`} src={item.previewSource} />
+                      <img alt="" className={`h-full w-full object-cover transition-all ${item.isOffline ? 'grayscale opacity-60' : 'grayscale group-hover:grayscale-0'}`} src={item.thumbnailSource ?? item.previewSource} />
                       <div className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${item.isOffline ? 'bg-wrong text-title-primary' : 'bg-correct text-title-primary'}`}>
                         {item.isOffline
                           ? translate({ key: 'adminCameraManager.offline' })

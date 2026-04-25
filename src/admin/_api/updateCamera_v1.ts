@@ -31,7 +31,7 @@ const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const qualityValues: Quality[] = ['low', 'medium', 'high'];
 
-export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const cameraId = data.cameraId.trim();
   const slug = data.slug.trim().toLowerCase();
   const name = data.name.trim();
@@ -129,6 +129,11 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   if (updateError || !updatedCamera) {
     return { status: 'error', errorCode: 'camera.unexpectedError', httpStatus: 500 };
   }
+
+  console.log('');
+  console.log(
+    `[action] admin/updateCamera cameraId=${cameraId} userId=${user.id} slug=${slug} ip=${cameraIp} targetFps=${String(targetFps)} quality=${quality}`,
+  );
 
   const streamConfigChanged =
     existingCamera.targetFps !== targetFps || existingCamera.quality !== quality;

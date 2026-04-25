@@ -28,7 +28,7 @@ const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const qualityValues: Quality[] = ['low', 'medium', 'high'];
 
-export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const slug = data.slug.trim().toLowerCase();
   const name = data.name.trim();
   const cameraIp = data.cameraIp.trim();
@@ -103,6 +103,11 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   if (createCameraError || !createdCamera) {
     return { status: 'error', errorCode: 'camera.unexpectedError', httpStatus: 500 };
   }
+
+  console.log('');
+  console.log(
+    `[action] admin/createCamera cameraId=${createdCamera.id} userId=${user.id} slug=${slug} ip=${cameraIp}`,
+  );
 
   return {
     status: 'success',

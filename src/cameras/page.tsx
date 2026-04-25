@@ -19,6 +19,17 @@ interface PageProps {
 
 type CameraQuality = 'low' | 'medium' | 'high';
 
+interface Capabilities {
+  hasCamera: boolean;
+  hasIR: boolean;
+  hasPanTilt: boolean;
+  hasMicrophone: boolean;
+  hasSpeaker: boolean;
+  hasMotion: boolean;
+  hasZoom: boolean;
+  hasTemperature: boolean;
+}
+
 interface CameraListItem {
   id: string;
   slug: string;
@@ -31,6 +42,8 @@ interface CameraListItem {
   canPreview: boolean;
   canControl: boolean;
   lastSeenAt: string | null;
+  capabilities: Capabilities | null;
+  activeRecording: { recordingId: string; startedAt: string } | null;
 }
 
 interface CameraState {
@@ -46,12 +59,25 @@ interface CameraState {
   motionDetected: boolean;
   measuredFps: number | null;
   lastFrameAgeMs: number | null;
+  zoomLevel: number | null;
   updatedAt: string;
 }
 
 const PREVIEW_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
-type CommandAction = 'panLeft' | 'panRight' | 'tiltUp' | 'tiltDown' | 'irOn' | 'irOff' | 'recordStart' | 'recordStop';
+type CommandAction =
+  | 'panLeft'
+  | 'panRight'
+  | 'tiltUp'
+  | 'tiltDown'
+  | 'irOn'
+  | 'irOff'
+  | 'recordStart'
+  | 'recordStop'
+  | 'zoomIn'
+  | 'zoomOut'
+  | 'talkbackOn'
+  | 'talkbackOff';
 
 const formatRecordingDuration = (startIso: string | null): string => {
   if (!startIso) {
@@ -101,12 +127,12 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     reasonCode?: string;
   } | null>(null);
 
-  const [zoomLevel, setZoomLevel] = useState<number>(42);
   const [outputAudioEnabled, setOutputAudioEnabled] = useState<boolean>(true);
   const [uplinkMicEnabled, setUplinkMicEnabled] = useState<boolean>(false);
   const [micLevel, setMicLevel] = useState<number>(0);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
   const [recordingDurationLabel, setRecordingDurationLabel] = useState<string>('00:00:00');
+  const seededRecordingForCameraIdRef = useRef<string | null>(null);
 
   const forcedCameraId = params?.id ?? params?.cameraId ?? params?.cameraid ?? searchParams?.cameraId ?? searchParams?.id ?? null;
 
@@ -273,6 +299,31 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     void loadCameraState(selectedCameraId);
   }, [selectedCameraId, loadCameraState, stopPreview]);
 
+  // Seed recordingStartedAt from the loader's activeRecording field — once per
+  // selected camera, so cameraStateUpdated sync mutations to `cameras` don't
+  // clobber the live recordingStatus value. Without this seed, opening the
+  // page mid-recording would show "not recording" until the next stop event.
+  useEffect(() => {
+    if (!selectedCameraId) {
+      seededRecordingForCameraIdRef.current = null;
+      setRecordingStartedAt(null);
+      return;
+    }
+
+    if (seededRecordingForCameraIdRef.current === selectedCameraId) {
+      return;
+    }
+
+    const target = cameras.find((camera) => camera.id === selectedCameraId);
+    if (!target) {
+      // Cameras list hasn't loaded yet for this id — wait for the next tick.
+      return;
+    }
+
+    setRecordingStartedAt(target.activeRecording?.startedAt ?? null);
+    seededRecordingForCameraIdRef.current = selectedCameraId;
+  }, [selectedCameraId, cameras]);
+
   useEffect(() => {
     return () => {
       stopPreview();
@@ -310,6 +361,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
               ...(serverOutput.patch.irMode === undefined ? {} : { irMode: serverOutput.patch.irMode }),
               ...(serverOutput.patch.targetFps === undefined ? {} : { targetFps: serverOutput.patch.targetFps }),
               ...(serverOutput.patch.quality === undefined ? {} : { quality: serverOutput.patch.quality }),
+              ...(serverOutput.patch.capabilities === undefined ? {} : { capabilities: serverOutput.patch.capabilities }),
             };
           });
         });
@@ -336,6 +388,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
             ...(serverOutput.patch.recording === undefined ? {} : { recording: serverOutput.patch.recording }),
             ...(serverOutput.patch.measuredFps === undefined ? {} : { measuredFps: serverOutput.patch.measuredFps }),
             ...(serverOutput.patch.lastFrameAgeMs === undefined ? {} : { lastFrameAgeMs: serverOutput.patch.lastFrameAgeMs }),
+            ...(serverOutput.patch.zoomLevel === undefined ? {} : { zoomLevel: serverOutput.patch.zoomLevel }),
             updatedAt: serverOutput.at,
           };
         });
@@ -377,10 +430,30 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       },
     });
 
+    // Recording state on this page is authoritatively driven by the muxer via
+    // recordingStatus sync. The Pi Zero `mode === 'record'` telemetry hint is
+    // no longer the source of truth (set_recording is no longer enqueued).
+    const unsubscribeRecording = upsertSyncEventCallback({
+      name: 'cameras/recordingStatus',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        if (selectedCameraId !== serverOutput.cameraId) {
+          return;
+        }
+
+        if (serverOutput.recordingId && serverOutput.startedAt) {
+          setRecordingStartedAt(serverOutput.startedAt);
+        } else {
+          setRecordingStartedAt(null);
+        }
+      },
+    });
+
     return () => {
       unsubscribeState();
       unsubscribeCommand();
       unsubscribeForcedLeave();
+      unsubscribeRecording();
     };
   }, [selectedCameraId, session?.id, stopPreview, upsertSyncEventCallback]);
 
@@ -655,25 +728,21 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   }, [selectedCameraId, selectedCamera?.canPreview, previewActive, previewStarting, startPreview]);
 
   useEffect(() => {
-    if (!cameraState?.recording) {
-      setRecordingStartedAt(null);
+    if (!recordingStartedAt) {
       setRecordingDurationLabel('00:00:00');
       return;
     }
 
-    if (!recordingStartedAt) {
-      setRecordingStartedAt(cameraState.updatedAt);
-      setRecordingDurationLabel(formatRecordingDuration(cameraState.updatedAt));
-    }
+    setRecordingDurationLabel(formatRecordingDuration(recordingStartedAt));
 
     const interval = globalThis.setInterval(() => {
-      setRecordingDurationLabel(formatRecordingDuration(recordingStartedAt ?? cameraState.updatedAt));
+      setRecordingDurationLabel(formatRecordingDuration(recordingStartedAt));
     }, 1000);
 
     return () => {
       globalThis.clearInterval(interval);
     };
-  }, [cameraState?.recording, cameraState?.updatedAt, recordingStartedAt]);
+  }, [recordingStartedAt]);
 
   useEffect(() => {
     const stopMicCapture = () => {
@@ -770,6 +839,13 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
   const controlsDisabled = busyAction !== null || !selectedCamera?.canControl;
 
+  const caps = selectedCamera?.capabilities ?? null;
+  const irDisabled = controlsDisabled || !(caps?.hasIR ?? true);
+  const panTiltDisabled = controlsDisabled || !(caps?.hasPanTilt ?? true);
+  const zoomDisabled = controlsDisabled || !(caps?.hasZoom ?? true);
+  const talkbackDisabled = controlsDisabled || !(caps?.hasSpeaker ?? true);
+  const sysAudioDisabled = !(caps?.hasMicrophone ?? true);
+
   const qualityLabel = useMemo(() => {
     if (!selectedCamera) {
       return '—';
@@ -787,8 +863,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     }
     return `${String(Math.round(measured))}FPS`;
   }, [cameraState?.measuredFps]);
-  const zoomLabel = `${(1 + (zoomLevel / 30)).toFixed(1)}X`;
-  const recordingActive = Boolean(cameraState?.recording);
+  const zoomLevel = cameraState?.zoomLevel ?? 50;
+  const zoomLabel = cameraState?.zoomLevel === null || cameraState?.zoomLevel === undefined
+    ? '—'
+    : `${String(Math.round(cameraState.zoomLevel))}%`;
+  const recordingActive = recordingStartedAt !== null;
   const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';
 
   const previewActionLabel = useMemo(() => {
@@ -821,7 +900,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       <div className={`relative ${sizeClassName} rounded-full border border-container2-border bg-container2 p-6`}>
         <button
           className={`absolute left-1/2 top-4 h-11 w-11 -translate-x-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
-          disabled={controlsDisabled}
+          disabled={panTiltDisabled}
           onClick={() => {
             void sendCommand('tiltUp');
           }}
@@ -834,7 +913,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
         <button
           className={`absolute bottom-4 left-1/2 h-11 w-11 -translate-x-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
-          disabled={controlsDisabled}
+          disabled={panTiltDisabled}
           onClick={() => {
             void sendCommand('tiltDown');
           }}
@@ -847,7 +926,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
         <button
           className={`absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
-          disabled={controlsDisabled}
+          disabled={panTiltDisabled}
           onClick={() => {
             void sendCommand('panLeft');
           }}
@@ -860,7 +939,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
         <button
           className={`absolute right-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full border border-container1-border bg-container1 shadow-sm transition-colors hover:border-primary/35 disabled:opacity-60`}
-          disabled={controlsDisabled}
+          disabled={panTiltDisabled}
           onClick={() => {
             void sendCommand('panRight');
           }}
@@ -884,7 +963,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
         </button>
       </div>
     );
-  }, [controlsDisabled, loadCameraState, selectedCamera, sendCommand]);
+  }, [panTiltDisabled, loadCameraState, selectedCamera, sendCommand]);
 
   const renderPreviewPanel = useCallback((desktop: boolean) => {
     return (
@@ -1094,18 +1173,35 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   </div>
 
                   <div className={`mt-3 flex items-center gap-2 rounded-xl border border-container2-border bg-container2 p-3`}>
-                    <Icon name="zoom_out" size="18px" customClasses="text-common" />
+                    <button
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-container1-border bg-container1 transition-colors hover:border-primary/35 disabled:opacity-60`}
+                      disabled={zoomDisabled}
+                      onClick={() => {
+                        void sendCommand('zoomOut');
+                      }}
+                      type="button"
+                    >
+                      <Icon name="zoom_out" size="18px" customClasses="text-common" />
+                    </button>
                     <input
-                      className={`w-full accent-primary`}
+                      className={`w-full accent-primary disabled:opacity-60`}
+                      disabled
                       max={100}
                       min={1}
-                      onChange={(event) => {
-                        setZoomLevel(Number(event.target.value));
-                      }}
+                      readOnly
                       type="range"
                       value={zoomLevel}
                     />
-                    <Icon name="zoom_in" size="18px" customClasses="text-common" />
+                    <button
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-container1-border bg-container1 transition-colors hover:border-primary/35 disabled:opacity-60`}
+                      disabled={zoomDisabled}
+                      onClick={() => {
+                        void sendCommand('zoomIn');
+                      }}
+                      type="button"
+                    >
+                      <Icon name="zoom_in" size="18px" customClasses="text-common" />
+                    </button>
                   </div>
                 </div>
 
@@ -1124,7 +1220,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                       return (
                         <button
                           className={`rounded-lg border px-2 py-2 text-xs font-bold ${active ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'} disabled:opacity-60`}
-                          disabled={controlsDisabled}
+                          disabled={irDisabled}
                           key={item.mode}
                           onClick={() => {
                             void setIRMode(item.mode);
@@ -1144,9 +1240,15 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                       {translate({ key: 'cameraDesign.systemAudio' })}
                     </div>
                     <button
-                      className={`w-full rounded-xl border px-3 py-3 text-xs font-bold ${outputAudioEnabled ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'}`}
+                      className={`w-full rounded-xl border px-3 py-3 text-xs font-bold disabled:opacity-60 ${outputAudioEnabled ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'}`}
+                      disabled={sysAudioDisabled}
                       onClick={() => {
-                        setOutputAudioEnabled((previous) => !previous);
+                        setOutputAudioEnabled((previous) => {
+                          const next = !previous;
+                          console.log('');
+                          console.log(`[ui] system audio enabled=${String(next)}`);
+                          return next;
+                        });
                       }}
                       type="button"
                     >
@@ -1173,9 +1275,14 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
                     <div className={`flex items-center gap-3`}>
                       <button
-                        className={`h-12 w-12 shrink-0 rounded-full border ${uplinkMicEnabled ? 'border-primary-border bg-primary/10' : 'border-container2-border bg-container2'}`}
+                        className={`h-12 w-12 shrink-0 rounded-full border disabled:opacity-60 ${uplinkMicEnabled ? 'border-primary-border bg-primary/10' : 'border-container2-border bg-container2'}`}
+                        disabled={talkbackDisabled}
                         onClick={() => {
-                          setUplinkMicEnabled((previous) => !previous);
+                          setUplinkMicEnabled((previous) => {
+                            const next = !previous;
+                            void sendCommand(next ? 'talkbackOn' : 'talkbackOff');
+                            return next;
+                          });
                         }}
                         type="button"
                       >
@@ -1342,18 +1449,35 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                     </div>
 
                     <div className={`mx-auto flex max-w-44 items-center gap-1.5`}>
-                      <Icon name="zoom_out" size="16px" customClasses="text-common" />
+                      <button
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-container2-border bg-container1 transition-colors hover:border-primary/35 disabled:opacity-60`}
+                        disabled={zoomDisabled}
+                        onClick={() => {
+                          void sendCommand('zoomOut');
+                        }}
+                        type="button"
+                      >
+                        <Icon name="zoom_out" size="16px" customClasses="text-common" />
+                      </button>
                       <input
-                        className={`w-40 accent-primary`}
+                        className={`w-40 accent-primary disabled:opacity-60`}
+                        disabled
                         max={100}
                         min={1}
-                        onChange={(event) => {
-                          setZoomLevel(Number(event.target.value));
-                        }}
+                        readOnly
                         type="range"
                         value={zoomLevel}
                       />
-                      <Icon name="zoom_in" size="16px" customClasses="text-common" />
+                      <button
+                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-container2-border bg-container1 transition-colors hover:border-primary/35 disabled:opacity-60`}
+                        disabled={zoomDisabled}
+                        onClick={() => {
+                          void sendCommand('zoomIn');
+                        }}
+                        type="button"
+                      >
+                        <Icon name="zoom_in" size="16px" customClasses="text-common" />
+                      </button>
                     </div>
                   </div>
 
@@ -1372,7 +1496,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                         return (
                           <button
                             className={`rounded-md border px-1.5 py-1.5 text-[11px] font-bold ${active ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container1 text-title'} disabled:opacity-60`}
-                            disabled={controlsDisabled}
+                            disabled={irDisabled}
                             key={`desktop-${item.mode}`}
                             onClick={() => {
                               void setIRMode(item.mode);
@@ -1387,9 +1511,15 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   </div>
 
                   <button
-                    className={`rounded-xl border px-3 py-2 text-xs font-bold ${outputAudioEnabled ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'}`}
+                    className={`rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-60 ${outputAudioEnabled ? 'border-primary-border bg-primary text-title-primary' : 'border-container2-border bg-container2 text-title'}`}
+                    disabled={sysAudioDisabled}
                     onClick={() => {
-                      setOutputAudioEnabled((previous) => !previous);
+                      setOutputAudioEnabled((previous) => {
+                        const next = !previous;
+                        console.log('');
+                        console.log(`[ui] system audio enabled=${String(next)}`);
+                        return next;
+                      });
                     }}
                     type="button"
                   >
@@ -1405,9 +1535,14 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                         {translate({ key: 'cameraDesign.commUplink' })}
                       </div>
                       <button
-                        className={`h-8 w-8 rounded-full border ${uplinkMicEnabled ? 'border-primary-border bg-primary/10' : 'border-container2-border bg-container1'}`}
+                        className={`h-8 w-8 rounded-full border disabled:opacity-60 ${uplinkMicEnabled ? 'border-primary-border bg-primary/10' : 'border-container2-border bg-container1'}`}
+                        disabled={talkbackDisabled}
                         onClick={() => {
-                          setUplinkMicEnabled((previous) => !previous);
+                          setUplinkMicEnabled((previous) => {
+                            const next = !previous;
+                            void sendCommand(next ? 'talkbackOn' : 'talkbackOff');
+                            return next;
+                          });
                         }}
                         type="button"
                       >

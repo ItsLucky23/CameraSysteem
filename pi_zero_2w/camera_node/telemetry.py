@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from camera_node.boot_probe import CapabilityReport
 from camera_node.models import CameraState, CommandResult
 
 
@@ -31,6 +32,7 @@ def to_ingest_payload(
     node_secret: str,
     state: CameraState,
     command_result: CommandResult | None,
+    capabilities: CapabilityReport | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "cameraIp": camera_ip,
@@ -46,7 +48,22 @@ def to_ingest_payload(
         "recording": state.recording,
         "measuredFps": state.measured_fps,
         "lastFrameAgeMs": state.last_frame_age_ms,
+        "zoomLevel": state.zoom_level,
     }
+
+    if capabilities is not None:
+        # Capabilities don't change at runtime, but we send them every tick so
+        # a Pi 5 restart self-heals from the next ~5s telemetry. ~80 bytes.
+        payload["capabilities"] = {
+            "hasCamera": capabilities.has_camera,
+            "hasIR": capabilities.has_ir,
+            "hasPanTilt": capabilities.has_pan_tilt,
+            "hasMicrophone": capabilities.has_microphone,
+            "hasSpeaker": capabilities.has_speaker,
+            "hasMotion": capabilities.has_motion,
+            "hasZoom": capabilities.has_zoom,
+            "hasTemperature": capabilities.has_temperature,
+        }
 
     if command_result:
         payload["commandResult"] = command_result.to_api_payload()

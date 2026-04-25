@@ -31,6 +31,10 @@ class VideoPublisher:
         self._measured_fps: float | None = None
         self._last_frame_at: float | None = None
         self._last_frame_count: int = 0
+        self._stall_watchdog_task: asyncio.Task | None = None
+        # Track the largest frame-to-frame gap during the current pipeline run
+        # so a recovered hiccup leaves a single warning rather than a flood.
+        self._last_stall_warn_at: float = 0.0
 
     async def start(
         self,
@@ -70,6 +74,17 @@ class VideoPublisher:
             target_fps=target_fps,
             bitrate_bps=bitrate_bps,
         )
+        # Single-line stamp so it's easy to compare against the Pi 5
+        # "[cam X] DB stream config -> ..." log line and confirm what
+        # actually reached the encoder.
+        logger.info(
+            "Effective stream params: target_fps=%s (uncapped=%s) bitrate_bps=%s rtp=%s:%s",
+            target_fps,
+            target_fps <= 0,
+            bitrate_bps,
+            rtp_host,
+            rtp_port,
+        )
         logger.info("Starting video stream: %s", cmd)
 
         self._process = await asyncio.create_subprocess_shell(
@@ -84,6 +99,11 @@ class VideoPublisher:
 
         # Drain stderr in the background so the pipe does not fill and deadlock the pipeline.
         asyncio.create_task(self._drain_stderr(self._process))
+        # Watchdog: catches the "20s slowdown" symptom where the pipeline keeps
+        # producing frames but at sub-target rate. The reconciler on Pi 5 only
+        # kicks on >20s of *zero* RTP, so a partial stall slips past it. This
+        # task logs visible breadcrumbs every time frames go silent for >1s.
+        self._stall_watchdog_task = asyncio.create_task(self._stall_watchdog())
 
     async def stop(self) -> None:
         if self._process is None:
@@ -98,6 +118,11 @@ class VideoPublisher:
         self._measured_fps = None
         self._last_frame_at = None
         self._last_frame_count = 0
+        self._last_stall_warn_at = 0.0
+
+        if self._stall_watchdog_task is not None:
+            self._stall_watchdog_task.cancel()
+            self._stall_watchdog_task = None
 
         if process.returncode is not None:
             return
@@ -118,6 +143,11 @@ class VideoPublisher:
 
     def is_running(self) -> bool:
         return self._process is not None and self._process.returncode is None
+
+    def is_active(self) -> bool:
+        # Public-facing alias for callers (thumbnail_publisher) that need to
+        # check whether the rpicam-vid pipeline is currently holding the sensor.
+        return self.is_running()
 
     def get_stats(self) -> tuple[float | None, int | None]:
         """
@@ -213,6 +243,37 @@ class VideoPublisher:
         return (
             f"{shlex.join(rpicam_args)} | {shlex.join(ffmpeg_args)}"
         )
+
+    async def _stall_watchdog(self) -> None:
+        # Sleep until we get our first progress line; until then there's nothing
+        # to compare against. Using 500ms ticks keeps the watchdog cheap.
+        WARN_GAP_MS = 1000
+        REWARN_INTERVAL_S = 5.0
+        try:
+            while self.is_running():
+                await asyncio.sleep(0.5)
+                last_frame_at = self._last_frame_at
+                if last_frame_at is None:
+                    continue
+                gap_ms = int(max(0.0, (time.monotonic() - last_frame_at) * 1000))
+                if gap_ms < WARN_GAP_MS:
+                    continue
+                # Throttle so a single 30s stall produces a few breadcrumbs
+                # rather than 60 lines of the same warning.
+                now = time.monotonic()
+                if now - self._last_stall_warn_at < REWARN_INTERVAL_S:
+                    continue
+                self._last_stall_warn_at = now
+                logger.warning(
+                    "VideoPublisher stall watchdog: no new frame for %sms "
+                    "(target_fps=%s last_frame_count=%s measured_fps=%s)",
+                    gap_ms,
+                    self._target_fps,
+                    self._last_frame_count,
+                    self._measured_fps,
+                )
+        except asyncio.CancelledError:
+            return
 
     async def _drain_stderr(self, process: asyncio.subprocess.Process) -> None:
         if process.stderr is None:

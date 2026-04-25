@@ -29,7 +29,9 @@ class MockHardwareAdapter(HardwareAdapter):
             temperature_c=None,
             motion_detected=False,
             recording=False,
+            zoom_level=50,
         )
+        self._talkback_enabled = False
 
     async def startup(self) -> None:
         await asyncio.sleep(0)
@@ -49,6 +51,7 @@ class MockHardwareAdapter(HardwareAdapter):
             temperature_c=self._state.temperature_c,
             motion_detected=self._state.motion_detected,
             recording=self._state.recording,
+            zoom_level=self._state.zoom_level,
         )
 
     async def pan(self, delta: int) -> None:
@@ -92,3 +95,21 @@ class MockHardwareAdapter(HardwareAdapter):
     async def stop_video_stream(self) -> None:
         await asyncio.sleep(0)
         logger.info("MockHardwareAdapter: pretending to stop RTP stream")
+
+    async def set_zoom(self, level: int) -> None:
+        await asyncio.sleep(0)
+        try:
+            new_level = _clamp(int(level), 1, 100)
+            old_level = self._state.zoom_level
+            self._state.zoom_level = new_level
+            print(f"[adapter] set_zoom level={old_level} -> {new_level}")
+        except Exception as error:  # noqa: BLE001
+            print(f"[adapter] set_zoom failed: {error}")
+
+    async def set_talkback(self, enabled: bool) -> None:
+        await asyncio.sleep(0)
+        try:
+            self._talkback_enabled = bool(enabled)
+            print(f"[adapter] set_talkback enabled={self._talkback_enabled}")
+        except Exception as error:  # noqa: BLE001
+            print(f"[adapter] set_talkback failed: {error}")

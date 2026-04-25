@@ -29,6 +29,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
+  console.log('');
+  console.log(
+    `[action] cameras/webrtc/offer cameraId=${cameraId} userId=${user.id} offerSdpLen=${String(offerSdp.length)}`,
+  );
+
   const [cameraFetchError, cameraFetchResult] = await tryCatch(async () => {
     return Promise.all([
       functions.db.prisma.camera.findUnique({

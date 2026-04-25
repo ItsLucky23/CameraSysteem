@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import notify from 'src/_functions/notify';
 import { useTranslator } from 'src/_functions/translator';
 import { apiRequest } from 'src/_sockets/apiRequest';
+import { joinRoom, leaveRoom } from 'src/_sockets/socketInitializer';
+import { useSyncEvents } from 'src/_sockets/syncRequest';
 import Icon from 'src/_components/Icon';
 import useRouter from 'src/_components/Router';
 
@@ -18,11 +20,18 @@ interface CameraListItem {
   canPreview: boolean;
   canControl: boolean;
   lastSeenAt: string | null;
+  activeRecording: { recordingId: string; startedAt: string } | null;
+}
+
+interface ThumbnailEntry {
+  jpegBase64: string;
+  capturedAt: string;
 }
 
 interface CameraViewModel {
   camera: CameraListItem;
   previewSource: string;
+  thumbnailSource: string | null;
   isOffline: boolean;
   isRecording: boolean;
   statusKey: 'cameras.statusOnline' | 'cameras.statusOffline';
@@ -36,18 +45,6 @@ const cameraPreviewSources = [
   'https://lh3.googleusercontent.com/aida-public/AB6AXuBptm649nDGzGwRTIuSp_X2GZRo9DPrY0b0XCfkL31ukNfrOgpk173kaM2Z4LX9Q6BWcPQttBs31JNGkldm1c6ZtFOpCJYyZdiEFgsRYfjYa-rCjOuKqnRIUcLc5MeactPWt_awH9WTX8vQTcwdI3Tv_shJS747U-jajjq2nrtg1zCCPxb33Z6rhvoZcHWF-uUexzEm5ugixS9MpAPFDLJ5QtB5q6WZZUnssR0MXtfITYgOLuiN-iHlNoa57c4_JrgasMh1xBPOZD0',
   'https://lh3.googleusercontent.com/aida-public/AB6AXuAhj8KCmDmXB0aXB2v4SzTBYFbm3PQnaWRf9tgSPPfjtzhKHXL3yninfZ2RGRxwoBJKcNqgEa35IOSQzo6uWw-36qc5Nk7T7gcYbKltPVsfhmXGhMeWOtq9qijqec3ckdmAbtqElrrBY2400q0De9l0x17hN61c7zKqHIz0dGitIuLf2gbHRyl22ZKWUTWrIRooVhIl0_aAbAH_sSMMzfOARES1Ainsxqq0czIiYAIgR6TWKq3DqBy-_wRoVbBoXolpR7ZurkJ5qmI',
 ];
-
-const getDeterministicUptimeMs = (cameraId: string): number => {
-  const base = cameraId
-    .split('')
-    .reduce((value, char) => value + char.charCodeAt(0), 0);
-
-  const days = (base % 14) + 1;
-  const hours = base % 24;
-  const minutes = base % 59;
-
-  return (((days * 24) + hours) * 60 + minutes) * 60 * 1000;
-};
 
 const formatDuration = (durationMs: number): string => {
   const safe = Math.max(0, durationMs);
@@ -63,9 +60,12 @@ const formatDuration = (durationMs: number): string => {
 export default function DashboardPage() {
   const translate = useTranslator();
   const router = useRouter();
+  const { upsertSyncEventCallback } = useSyncEvents();
 
   const [loading, setLoading] = useState<boolean>(true);
   const [cameras, setCameras] = useState<CameraListItem[]>([]);
+  const [thumbnails, setThumbnails] = useState<Map<string, ThumbnailEntry>>(new Map());
+  const [recordingCameraIds, setRecordingCameraIds] = useState<Set<string>>(new Set());
 
   const loadCameras = useCallback(async () => {
     setLoading(true);
@@ -82,12 +82,102 @@ export default function DashboardPage() {
     }
 
     setCameras(response.cameras);
+    setThumbnails((previous) => {
+      const next = new Map(previous);
+      for (const camera of response.cameras) {
+        if (camera.thumbnail) {
+          next.set(camera.id, {
+            jpegBase64: camera.thumbnail.jpegBase64,
+            capturedAt: camera.thumbnail.capturedAt,
+          });
+        }
+      }
+      return next;
+    });
+    setRecordingCameraIds(() => {
+      const next = new Set<string>();
+      for (const camera of response.cameras) {
+        if (camera.activeRecording) {
+          next.add(camera.id);
+        }
+      }
+      return next;
+    });
     setLoading(false);
   }, []);
 
   useEffect(() => {
     void loadCameras();
   }, [loadCameras]);
+
+  useEffect(() => {
+    const roomCode = 'cameras-overview';
+    void joinRoom(roomCode);
+
+    return () => {
+      void leaveRoom(roomCode);
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribeState = upsertSyncEventCallback({
+      name: 'cameras/cameraStateUpdated',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setCameras((previous) => {
+          return previous.map((camera) => {
+            if (camera.id !== serverOutput.cameraId) {
+              return camera;
+            }
+
+            return {
+              ...camera,
+              ...(typeof serverOutput.patch.isOnline === 'boolean' ? { isOnline: serverOutput.patch.isOnline } : {}),
+              ...(serverOutput.patch.mode === undefined ? {} : { mode: serverOutput.patch.mode }),
+              ...(serverOutput.patch.irMode === undefined ? {} : { irMode: serverOutput.patch.irMode }),
+            };
+          });
+        });
+      },
+    });
+
+    const unsubscribeThumbnail = upsertSyncEventCallback({
+      name: 'cameras/thumbnailUpdated',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setThumbnails((previous) => {
+          const next = new Map(previous);
+          next.set(serverOutput.cameraId, {
+            jpegBase64: serverOutput.jpegBase64,
+            capturedAt: serverOutput.capturedAt,
+          });
+          return next;
+        });
+      },
+    });
+
+    const unsubscribeRecording = upsertSyncEventCallback({
+      name: 'cameras/recordingStatus',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setRecordingCameraIds((previous) => {
+          const next = new Set(previous);
+          if (serverOutput.recordingId) {
+            next.add(serverOutput.cameraId);
+          } else {
+            next.delete(serverOutput.cameraId);
+          }
+          return next;
+        });
+      },
+    });
+
+    return () => {
+      unsubscribeState();
+      unsubscribeThumbnail();
+      unsubscribeRecording();
+    };
+  }, [upsertSyncEventCallback]);
 
   const onlineCount = useMemo(() => {
     return cameras.filter((camera) => camera.isOnline).length;
@@ -108,12 +198,13 @@ export default function DashboardPage() {
   const cameraViewModels = useMemo<CameraViewModel[]>(() => {
     return cameras.map((camera, index) => {
       const parsedLastSeenAt = camera.lastSeenAt ? Date.parse(camera.lastSeenAt) : Number.NaN;
-      const uptimeMs = Number.isFinite(parsedLastSeenAt)
-        ? Date.now() - parsedLastSeenAt
-        : getDeterministicUptimeMs(camera.id);
+      const hasLastSeen = Number.isFinite(parsedLastSeenAt);
+      const uptimeMs = hasLastSeen ? Date.now() - parsedLastSeenAt : 0;
 
       const isOffline = !camera.isOnline || camera.mode === 'off';
-      const isRecording = camera.mode === 'record';
+      // Authoritative source for recording state is the recordingStatus sync —
+      // muxer-driven, not derived from Pi Zero telemetry mode flag.
+      const isRecording = recordingCameraIds.has(camera.id);
 
       const recordingKey = isRecording
         ? 'dashboard.recordingActive'
@@ -121,17 +212,21 @@ export default function DashboardPage() {
           ? 'dashboard.recordingDisabled'
           : 'dashboard.recordingPaused';
 
+      const thumbnail = thumbnails.get(camera.id);
+      const thumbnailSource = thumbnail ? `data:image/jpeg;base64,${thumbnail.jpegBase64}` : null;
+
       return {
         camera,
         previewSource: cameraPreviewSources[index % cameraPreviewSources.length],
+        thumbnailSource,
         isOffline,
         isRecording,
         statusKey: isOffline ? 'cameras.statusOffline' : 'cameras.statusOnline',
         recordingKey,
-        uptime: isOffline ? '--' : formatDuration(uptimeMs),
+        uptime: isOffline || !hasLastSeen ? '--' : formatDuration(uptimeMs),
       };
     });
-  }, [cameras]);
+  }, [cameras, thumbnails, recordingCameraIds]);
 
   const openCamera = useCallback((cameraId: string, canPreview: boolean) => {
     if (!canPreview) {
@@ -216,7 +311,7 @@ export default function DashboardPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-start gap-3">
                         <div className="relative h-16 w-16 overflow-hidden rounded-xl border border-container2-border bg-container2">
-                          <img alt="" className={`h-full w-full object-cover ${item.isOffline ? 'grayscale opacity-60' : 'grayscale contrast-125'}`} src={item.previewSource} />
+                          <img alt="" className={`h-full w-full object-cover ${item.isOffline ? 'grayscale opacity-60' : 'grayscale contrast-125'}`} src={item.thumbnailSource ?? item.previewSource} />
                           {!item.isOffline && (
                             <div className="absolute left-1 top-1 flex items-center gap-1 rounded bg-black/45 px-1">
                               <span className="h-1.5 w-1.5 rounded-full bg-correct animate-pulse" />
@@ -334,7 +429,7 @@ export default function DashboardPage() {
                   <div key={item.camera.id} className={`grid grid-cols-12 items-center gap-4 rounded-2xl border border-container2-border bg-container1 px-6 py-4 shadow-sm transition-colors ${item.isOffline ? 'border-l-4 border-l-wrong/50' : 'hover:bg-container1-hover'}`}>
                     <div className="col-span-5 flex items-center gap-4">
                       <div className={`relative h-14 w-20 overflow-hidden rounded-lg border border-container2-border bg-container2 ${item.isOffline ? 'opacity-55 grayscale' : ''}`}>
-                        <img alt="" className="h-full w-full object-cover" src={item.previewSource} />
+                        <img alt="" className="h-full w-full object-cover" src={item.thumbnailSource ?? item.previewSource} />
                         <div className="absolute left-1 top-1 rounded bg-black/45 px-1 text-[8px] font-bold uppercase tracking-wide text-white">{item.camera.slug}</div>
                       </div>
 

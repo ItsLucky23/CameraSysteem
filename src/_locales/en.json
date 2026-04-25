@@ -397,6 +397,27 @@
     "troubleshoot": "Troubleshoot",
     "viewFeed": "View Feed"
   },
+  "recordings": {
+    "title": "Recordings",
+    "subtitle": "Per-camera recordings grouped by camera.",
+    "loading": "Loading recordings...",
+    "empty": "No cameras with recording access.",
+    "startRecording": "Start recording",
+    "stopRecording": "Stop recording",
+    "activeRecording": "Recording",
+    "noRecordings": "No recordings yet.",
+    "duration": "Duration",
+    "size": "Size",
+    "play": "Play",
+    "close": "Close",
+    "startedAt": "Started",
+    "stopReason": "Stop reason",
+    "confirmStop": "Stop the active recording on this camera?",
+    "confirmStart": "Start a new recording on this camera?",
+    "errorStartFailed": "Failed to start recording.",
+    "errorStopFailed": "Failed to stop recording.",
+    "errorAccessDenied": "You do not have control access to this camera."
+  },
   "errorPage": {
     "goBack": "← Go Back",
     "home": "Home",
