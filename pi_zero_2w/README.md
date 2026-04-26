@@ -61,14 +61,19 @@ pi_zero_2w/
 
 1. Copy this folder to the Pi Zero, for example:
    - `/opt/camera/pi_zero_2w`
-2. Create virtual environment (required):
+2. **Install the lgpio C library + dev headers + swig system-wide** (mandatory — `gpiozero`'s default `NativeFactory` fallback can't talk to the Bookworm/Trixie GPIO chardev interface and silently breaks edge detection on PIR/servos):
+   - `sudo apt install -y python3-lgpio liblgpio1 liblgpio-dev swig python3-dev`
+3. Create virtual environment (required):
    - `python3 -m venv .venv`
    - `source .venv/bin/activate`
-3. Install dependencies:
+4. Install dependencies (this builds lgpio's Python binding inside the venv — needs swig from step 2):
    - `pip install -r requirements.txt`
-4. Create environment file:
+5. Verify the GPIO backend loads cleanly:
+   - `python3 -c "import lgpio; print('lgpio OK')"`
+   - if this prints anything other than `lgpio OK`, edge detection on PIR + PWM on servos will not work
+6. Create environment file:
    - `cp .env.example .env`
-5. Edit `.env` with real values:
+7. Edit `.env` with real values:
    - `PI5_BASE_URL`
    - `CAMERA_IP`
    - `NODE_SECRET`

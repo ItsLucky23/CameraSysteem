@@ -94,3 +94,23 @@ Before powering anything on, verify with a meter:
 
 - **Audio**: INMP441 MEMS mic (I²S) + MAX98357A amplifier (I²S). Wire only after the video base is stable and the Pi-Zero-side bidirectional audio pipeline exists.
 - **Cooling**: optional 5 V fan tied to the red rail if the Pi's CPU temperature climbs above 80 °C while streaming.
+
+---
+
+## 7. Software dependencies on the Pi Zero
+
+`gpiozero` needs a real GPIO backend or it silently falls back to `NativeFactory`, which on Bookworm/Trixie kernels cannot drive PWM (servos) or detect edges (PIR motion). Install `lgpio` system-wide AND in the camera_node venv:
+
+```bash
+# System-wide:
+sudo apt install -y python3-lgpio liblgpio1 liblgpio-dev swig python3-dev
+
+# Inside the camera_node venv:
+source /opt/camera/pi_zero_2w/.venv/bin/activate
+pip install lgpio        # builds against the apt-installed liblgpio + swig
+
+# Verify:
+python3 -c "import lgpio; print('lgpio OK')"
+```
+
+If `lgpio` is missing, `journalctl -u camera_node` will show `PinFactoryFallback: Falling back from lgpio: No module named 'lgpio'` and motion edges will never fire even though the boot probe says `motion detection OK`.

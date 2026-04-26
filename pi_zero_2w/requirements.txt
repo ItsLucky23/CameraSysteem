@@ -1,2 +1,6 @@
 aiohttp>=3.9.5,<4.0.0
 gpiozero>=2.0.1
+# Required GPIO backend on Bookworm/Trixie. Without it gpiozero falls back to
+# NativeFactory which cannot drive PWM (servos) or detect edges (PIR) on the
+# modern gpio chardev interface. Build needs `swig` + `python3-dev` (apt).
+lgpio>=0.2.2
