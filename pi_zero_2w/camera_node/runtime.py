@@ -43,11 +43,12 @@ class CameraNodeRuntime:
 
     async def run(self) -> None:
         logger.info("Starting camera node runtime for camera IP %s", self._settings.camera_ip)
-        await self._adapter.startup()
 
-        # Boot probe runs once after the adapter has had a chance to wire its
-        # GPIO devices. Failure modes are logged in the banner; we never
-        # crash on a missing component.
+        # Boot probe runs BEFORE adapter.startup(). The probe creates throw-away
+        # gpiozero devices on the configured pins to test them and closes them
+        # immediately. If we ran adapter.startup() first, the adapter would
+        # already own GPIO 18 (IR LED) and the probe's _probe_ir would falsely
+        # report FAIL "pin GPIO18 is already in use".
         try:
             self._capabilities = run_hardware_probe(
                 self._adapter,
@@ -57,6 +58,8 @@ class CameraNodeRuntime:
         except Exception as error:  # noqa: BLE001
             logger.warning("Boot probe raised unexpectedly: %s", error)
             self._capabilities = None
+
+        await self._adapter.startup()
 
         try:
             async with self._api_client:
