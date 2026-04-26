@@ -18,6 +18,7 @@ export interface SyncParams {
       tilt?: number;
       temperatureC?: number | null;
       motionDetected?: boolean;
+      lastMotionAt?: string | null;
       recording?: boolean;
       measuredFps?: number | null;
       lastFrameAgeMs?: number | null;

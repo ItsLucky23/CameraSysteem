@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import tryCatch from 'shared/tryCatch';
 
+import { confirmDialog } from 'src/_components/ConfirmMenu';
 import notify from 'src/_functions/notify';
 import { useTranslator } from 'src/_functions/translator';
 import { useSession } from 'src/_providers/SessionProvider';
@@ -66,11 +67,24 @@ interface CameraState {
   temperatureC: number | null;
   recording: boolean;
   motionDetected: boolean;
+  lastMotionAt: string | null;
   measuredFps: number | null;
   lastFrameAgeMs: number | null;
   zoomLevel: number | null;
   updatedAt: string;
 }
+
+interface ControlSessionState {
+  userId: string;
+  userName: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 4;
+const ZOOM_STEP = 0.5;
+const PTZ_HOLD_INTERVAL_MS = 250;
 
 const PREVIEW_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -83,10 +97,32 @@ type CommandAction =
   | 'irOff'
   | 'recordStart'
   | 'recordStop'
-  | 'zoomIn'
-  | 'zoomOut'
   | 'talkbackOn'
   | 'talkbackOff';
+
+type PtzAction = 'panLeft' | 'panRight' | 'tiltUp' | 'tiltDown';
+
+const formatRelativeAgo = (iso: string | null, now: number): string => {
+  if (!iso) return '—';
+  const ms = now - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return '—';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${String(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${String(minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)}h`;
+  return `${String(Math.floor(hours / 24))}d`;
+};
+
+const formatTimeUntil = (iso: string | null, now: number): string => {
+  if (!iso) return '—';
+  const ms = Math.max(0, Date.parse(iso) - now);
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes)}:${String(seconds).padStart(2, '0')}`;
+};
 
 const formatRecordingDuration = (startIso: string | null): string => {
   if (!startIso) return '00:00:00';
@@ -116,7 +152,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
   const [loadingList, setLoadingList] = useState<boolean>(true);
   const [loadingState, setLoadingState] = useState<boolean>(false);
-  const [busyAction, setBusyAction] = useState<null | CommandAction>(null);
   const [previewStarting, setPreviewStarting] = useState<boolean>(false);
   const [previewActive, setPreviewActive] = useState<boolean>(false);
   const [previewStatusKey, setPreviewStatusKey] = useState<string>('cameras.previewIdle');
@@ -141,6 +176,20 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const [recordingDurationLabel, setRecordingDurationLabel] = useState<string>('00:00:00');
   const seededRecordingForCameraIdRef = useRef<string | null>(null);
   const [recordingPending, setRecordingPending] = useState<'start' | 'stop' | null>(null);
+
+  // Control session — null = no one, otherwise { userId, name, expiresAt }.
+  const [controlSession, setControlSession] = useState<ControlSessionState | null>(null);
+  const [acquiringControl, setAcquiringControl] = useState<boolean>(false);
+  const [releasingControl, setReleasingControl] = useState<boolean>(false);
+
+  // Pure client-side CSS-zoom on the preview video. Reset on camera switch.
+  const [previewZoom, setPreviewZoom] = useState<number>(1);
+
+  // Wall-clock tick used for relative timestamps (motion ago, control TTL).
+  const [now, setNow] = useState<number>(() => Date.now());
+
+  // Hold-to-move PTZ — interval ref so onPointerDown/Up can stop the loop.
+  const ptzHoldTimerRef = useRef<ReturnType<typeof globalThis.setInterval> | null>(null);
 
   const forcedCameraId = params?.id ?? params?.cameraId ?? params?.cameraid ?? searchParams?.cameraId ?? searchParams?.id ?? null;
 
@@ -350,6 +399,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
             ...(serverOutput.patch.tilt === undefined ? {} : { tilt: serverOutput.patch.tilt }),
             ...(serverOutput.patch.temperatureC === undefined ? {} : { temperatureC: serverOutput.patch.temperatureC }),
             ...(serverOutput.patch.motionDetected === undefined ? {} : { motionDetected: serverOutput.patch.motionDetected }),
+            ...(serverOutput.patch.lastMotionAt === undefined ? {} : { lastMotionAt: serverOutput.patch.lastMotionAt }),
             ...(serverOutput.patch.recording === undefined ? {} : { recording: serverOutput.patch.recording }),
             ...(serverOutput.patch.measuredFps === undefined ? {} : { measuredFps: serverOutput.patch.measuredFps }),
             ...(serverOutput.patch.lastFrameAgeMs === undefined ? {} : { lastFrameAgeMs: serverOutput.patch.lastFrameAgeMs }),
@@ -417,18 +467,40 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       },
     });
 
+    const unsubscribeControlSession = upsertSyncEventCallback({
+      name: 'cameras/controlSession',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        if (selectedCameraId !== serverOutput.cameraId) return;
+        setControlSession(serverOutput.session ?? null);
+      },
+    });
+
     return () => {
       unsubscribeState();
       unsubscribeCommand();
       unsubscribeForcedLeave();
       unsubscribeThumbnail();
       unsubscribeRecording();
+      unsubscribeControlSession();
     };
   }, [selectedCameraId, session?.id, stopPreview, upsertSyncEventCallback]);
 
+  // Wipe control session state on camera switch — server broadcasts the
+  // current state on the room subscribe so we don't show stale info.
+  useEffect(() => {
+    setControlSession(null);
+    setPreviewZoom(1);
+  }, [selectedCameraId]);
+
+  // Tick `now` every second so the motion-ago label and control-TTL countdown stay live.
+  useEffect(() => {
+    const interval = globalThis.setInterval(() => { setNow(Date.now()); }, 1000);
+    return () => { globalThis.clearInterval(interval); };
+  }, []);
+
   const sendCommand = useCallback(async (action: CommandAction) => {
     if (!selectedCameraId) return;
-    setBusyAction(action);
     const response = await apiRequest({
       name: 'cameras/executeCameraCommand',
       version: 'v1',
@@ -438,7 +510,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
         action,
       },
     });
-    setBusyAction(null);
 
     if (response.status === 'success') {
       setLastCommandResult({
@@ -449,21 +520,19 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       return;
     }
 
-    notify.error({
-      key: response.errorCode,
-      ...('errorParams' in response ? { params: response.errorParams } : {}),
-    });
+    // Per-action 200ms PTZ lock occasionally rejects a too-fast hold tick —
+    // that's expected and shouldn't toast every time. Other errors still notify.
+    if (response.errorCode === 'camera.locked') return;
+    notify.error({ key: response.errorCode });
   }, [selectedCameraId]);
 
   const setIRMode = useCallback(async (irMode: 'off' | 'on' | 'auto') => {
     if (!selectedCameraId) return;
-    setBusyAction(irMode === 'on' ? 'irOn' : 'irOff');
     const response = await apiRequest({
       name: 'cameras/setIRMode',
       version: 'v1',
       data: { cameraId: selectedCameraId, irMode },
     });
-    setBusyAction(null);
     if (response.status === 'error') notify.error({ key: response.errorCode });
   }, [selectedCameraId]);
 
@@ -479,6 +548,94 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       setRecordingPending(null);
       notify.error({ key: response.errorCode });
     }
+  }, [selectedCameraId]);
+
+  const acquireControl = useCallback(async ({ takeOver }: { takeOver: boolean }) => {
+    if (!selectedCameraId) return;
+    setAcquiringControl(true);
+    const response = await apiRequest({
+      name: 'cameras/acquireControl',
+      version: 'v1',
+      data: { cameraId: selectedCameraId, takeOver },
+    });
+    setAcquiringControl(false);
+    if (response.status === 'error') {
+      notify.error({
+        key: response.errorCode,
+        ...('errorParams' in response ? { params: response.errorParams } : {}),
+      });
+      return;
+    }
+    setControlSession({
+      userId: response.session.userId,
+      userName: response.session.userName,
+      acquiredAt: response.session.acquiredAt,
+      expiresAt: response.session.expiresAt,
+    });
+  }, [selectedCameraId]);
+
+  const releaseControl = useCallback(async () => {
+    if (!selectedCameraId) return;
+    setReleasingControl(true);
+    const response = await apiRequest({
+      name: 'cameras/releaseControl',
+      version: 'v1',
+      data: { cameraId: selectedCameraId },
+    });
+    setReleasingControl(false);
+    if (response.status === 'error') {
+      notify.error({ key: response.errorCode });
+      return;
+    }
+    setControlSession(null);
+  }, [selectedCameraId]);
+
+  const handleTakeControl = useCallback(async () => {
+    if (!selectedCameraId) return;
+    if (controlSession && controlSession.userId !== session?.id) {
+      const confirmed = await confirmDialog({
+        title: translate({ key: 'aperture.monitor.confirmTakeOverTitle' }),
+        content: translate({ key: 'aperture.monitor.confirmTakeOverBody' }).replace('{{name}}', controlSession.userName),
+      });
+      if (!confirmed) return;
+      await acquireControl({ takeOver: true });
+      return;
+    }
+    await acquireControl({ takeOver: false });
+  }, [acquireControl, controlSession, selectedCameraId, session?.id, translate]);
+
+  const stopPtzHold = useCallback(() => {
+    if (ptzHoldTimerRef.current === null) return;
+    globalThis.clearInterval(ptzHoldTimerRef.current);
+    ptzHoldTimerRef.current = null;
+  }, []);
+
+  const startPtzHold = useCallback((action: PtzAction) => {
+    stopPtzHold();
+    // Fire once immediately, then on a 250ms cadence while the button is held.
+    // The server's 200ms PTZ cooldown lets this rhythm flow without rejection.
+    void sendCommand(action);
+    ptzHoldTimerRef.current = globalThis.setInterval(() => {
+      void sendCommand(action);
+    }, PTZ_HOLD_INTERVAL_MS);
+  }, [sendCommand, stopPtzHold]);
+
+  // Stop any in-flight PTZ hold when the user navigates away or switches cameras.
+  useEffect(() => () => { stopPtzHold(); }, [stopPtzHold]);
+  useEffect(() => { stopPtzHold(); }, [selectedCameraId, stopPtzHold]);
+
+  // Auto-release control on unmount or camera switch. Best-effort fire-and-
+  // forget: if the socket is already gone, the server's TTL cleans up.
+  useEffect(() => {
+    if (!selectedCameraId) return;
+    const cameraId = selectedCameraId;
+    return () => {
+      void apiRequest({
+        name: 'cameras/releaseControl',
+        version: 'v1',
+        data: { cameraId },
+      });
+    };
   }, [selectedCameraId]);
 
   const startPreview = useCallback(async () => {
@@ -725,11 +882,15 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     previewVideoRef.current.muted = !outputAudioEnabled;
   }, [outputAudioEnabled, previewActive]);
 
-  const controlsDisabled = busyAction !== null || !selectedCamera?.canControl;
+  const isController = controlSession?.userId === session?.id && !!session?.id;
+  const canTakeControl = !!selectedCamera?.canControl;
+  const controlsDisabled = !isController;
   const caps = selectedCamera?.capabilities ?? null;
   const irDisabled = controlsDisabled || !(caps?.hasIR ?? true);
   const panTiltDisabled = controlsDisabled || !(caps?.hasPanTilt ?? true);
-  const zoomDisabled = controlsDisabled || !(caps?.hasZoom ?? true);
+  // Zoom is now client-side CSS scale — no Pi Zero round-trip, no hardware
+  // dependency. Only blocked while the user isn't the controller.
+  const zoomDisabled = controlsDisabled;
   const talkbackDisabled = controlsDisabled || !(caps?.hasSpeaker ?? true);
   const sysAudioDisabled = !(caps?.hasMicrophone ?? true);
 
@@ -744,10 +905,27 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     return selectedCamera.quality.toUpperCase();
   }, [selectedCamera]);
 
-  const zoomLevel = cameraState?.zoomLevel ?? 50;
-  const zoomLabel = cameraState?.zoomLevel === null || cameraState?.zoomLevel === undefined
-    ? '—'
-    : `${(cameraState.zoomLevel / 25).toFixed(1)}×`;
+  // Client-side preview zoom (CSS scale). 1×..ZOOM_MAX×.
+  const zoomPercent = ((previewZoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100;
+  const zoomLabel = `${previewZoom.toFixed(1)}×`;
+
+  const motionLabel = useMemo(() => {
+    if (!(caps?.hasMotion ?? false)) return translate({ key: 'aperture.monitor.motionDisabled' });
+    if (cameraState?.motionDetected) return translate({ key: 'aperture.monitor.motionActive' });
+    if (cameraState?.lastMotionAt) {
+      return translate({ key: 'aperture.monitor.motionLastSeen' })
+        .replace('{{ago}}', formatRelativeAgo(cameraState.lastMotionAt, now));
+    }
+    return translate({ key: 'aperture.monitor.motionNeverSeen' });
+  }, [caps?.hasMotion, cameraState?.motionDetected, cameraState?.lastMotionAt, now, translate]);
+  const zoomInDisabled = zoomDisabled || previewZoom >= ZOOM_MAX;
+  const zoomOutDisabled = zoomDisabled || previewZoom <= ZOOM_MIN;
+  const handleZoomIn = useCallback(() => {
+    setPreviewZoom((current) => Math.min(ZOOM_MAX, Math.round((current + ZOOM_STEP) * 10) / 10));
+  }, []);
+  const handleZoomOut = useCallback(() => {
+    setPreviewZoom((current) => Math.max(ZOOM_MIN, Math.round((current - ZOOM_STEP) * 10) / 10));
+  }, []);
 
   let recordingActive: boolean;
   if (recordingPending === 'start') {
@@ -941,6 +1119,61 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
               </div>
             )}
 
+            {selectedCamera.canControl && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-container1-border bg-container2/40 px-7 py-2.5">
+                <div className="flex min-w-0 items-center gap-2 text-[12.5px]">
+                  {isController && (
+                    <>
+                      <StatusDot status="online" pulse />
+                      <span className="font-semibold text-title">{translate({ key: 'aperture.monitor.youAreInControl' })}</span>
+                      <span className="font-mono text-[11px] text-muted">
+                        · {translate({ key: 'aperture.monitor.controlExpiresIn' }).replace('{{time}}', formatTimeUntil(controlSession?.expiresAt ?? null, now))}
+                      </span>
+                    </>
+                  )}
+                  {!isController && controlSession && (
+                    <>
+                      <StatusDot status="offline" />
+                      <span className="text-common">{translate({ key: 'aperture.monitor.controlledBy' }).replace('{{name}}', controlSession.userName)}</span>
+                    </>
+                  )}
+                  {!isController && !controlSession && (
+                    <>
+                      <StatusDot status="idle" />
+                      <span className="text-muted">{translate({ key: 'aperture.monitor.noController' })}</span>
+                    </>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {isController ? (
+                    <button
+                      type="button"
+                      onClick={() => { void releaseControl(); }}
+                      disabled={releasingControl}
+                      className="inline-flex items-center gap-2 rounded-[10px] border border-container1-border bg-container1 px-3 py-1.5 text-[12.5px] font-medium text-title transition-colors hover:bg-container1-hover disabled:opacity-50"
+                    >
+                      <MaterialIcon name="logout" size={14} />
+                      {releasingControl ? translate({ key: 'aperture.monitor.releasing' }) : translate({ key: 'aperture.monitor.release' })}
+                    </button>
+                  ) : (
+                    canTakeControl && (
+                      <button
+                        type="button"
+                        onClick={() => { void handleTakeControl(); }}
+                        disabled={acquiringControl}
+                        className="inline-flex items-center gap-2 rounded-[10px] border border-primary-border bg-primary px-3 py-1.5 text-[12.5px] font-semibold text-title-primary transition-colors hover:bg-primary-hover disabled:opacity-50"
+                      >
+                        <MaterialIcon name="pan_tool" size={14} />
+                        {controlSession
+                          ? translate({ key: 'aperture.monitor.takeOverFrom' }).replace('{{name}}', controlSession.userName)
+                          : translate({ key: 'aperture.monitor.takeControl' })}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-hidden p-5 lg:grid-cols-[1fr_320px]">
               <section className="relative flex min-h-[18rem] flex-col overflow-hidden rounded-2xl bg-black">
                 {!previewActive && (
@@ -952,11 +1185,12 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
                 <video
                   autoPlay
-                  className={`h-full w-full object-contain ${previewActive ? 'block' : 'hidden'}`}
+                  className={`h-full w-full object-contain transition-transform duration-150 ${previewActive ? 'block' : 'hidden'}`}
                   controls={false}
                   muted={!outputAudioEnabled}
                   playsInline
                   ref={previewVideoRef}
+                  style={{ transform: previewZoom > 1 ? `scale(${String(previewZoom)})` : undefined, transformOrigin: 'center center' }}
                 >
                   <track kind="captions" />
                 </video>
@@ -983,40 +1217,38 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   </div>
                 )}
 
+                {cameraState?.motionDetected && (caps?.hasMotion ?? false) && (
+                  <div className={`absolute z-30 inline-flex items-center gap-1.5 rounded-lg bg-correct/85 px-2.5 py-1 backdrop-blur ${recordingActive ? 'right-3.5 top-12' : 'right-3.5 top-3.5'}`}>
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                    <span className="font-mono text-[11px] font-bold text-white">{translate({ key: 'aperture.monitor.motionActive' })}</span>
+                  </div>
+                )}
+
                 <div className="absolute bottom-4 left-4 z-30">
                   <div className="relative h-[140px] w-[140px] rounded-full border border-white/15 bg-black/45 backdrop-blur">
-                    <button
-                      type="button"
-                      disabled={panTiltDisabled}
-                      onClick={() => { void sendCommand('tiltUp'); }}
-                      className="absolute left-1/2 top-2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50"
-                    >
-                      <MaterialIcon name="keyboard_arrow_up" size={20} />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={panTiltDisabled}
-                      onClick={() => { void sendCommand('tiltDown'); }}
-                      className="absolute bottom-2 left-1/2 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50"
-                    >
-                      <MaterialIcon name="keyboard_arrow_down" size={20} />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={panTiltDisabled}
-                      onClick={() => { void sendCommand('panLeft'); }}
-                      className="absolute left-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50"
-                    >
-                      <MaterialIcon name="keyboard_arrow_left" size={20} />
-                    </button>
-                    <button
-                      type="button"
-                      disabled={panTiltDisabled}
-                      onClick={() => { void sendCommand('panRight'); }}
-                      className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50"
-                    >
-                      <MaterialIcon name="keyboard_arrow_right" size={20} />
-                    </button>
+                    {([
+                      { dir: 'tiltUp' as PtzAction, icon: 'keyboard_arrow_up', cls: 'absolute left-1/2 top-2 -translate-x-1/2' },
+                      { dir: 'tiltDown' as PtzAction, icon: 'keyboard_arrow_down', cls: 'absolute bottom-2 left-1/2 -translate-x-1/2' },
+                      { dir: 'panLeft' as PtzAction, icon: 'keyboard_arrow_left', cls: 'absolute left-2 top-1/2 -translate-y-1/2' },
+                      { dir: 'panRight' as PtzAction, icon: 'keyboard_arrow_right', cls: 'absolute right-2 top-1/2 -translate-y-1/2' },
+                    ]).map((btn) => (
+                      <button
+                        key={btn.dir}
+                        type="button"
+                        disabled={panTiltDisabled}
+                        onPointerDown={(event) => {
+                          event.preventDefault();
+                          if (panTiltDisabled) return;
+                          startPtzHold(btn.dir);
+                        }}
+                        onPointerUp={stopPtzHold}
+                        onPointerLeave={stopPtzHold}
+                        onPointerCancel={stopPtzHold}
+                        className={`${btn.cls} flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50`}
+                      >
+                        <MaterialIcon name={btn.icon} size={20} />
+                      </button>
+                    ))}
                     <button
                       type="button"
                       onClick={() => { void loadCameraState(selectedCamera.id); }}
@@ -1031,8 +1263,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                 <div className="absolute bottom-5 right-5 z-30 flex flex-col items-center gap-2 rounded-xl border border-white/15 bg-black/45 px-2 py-2.5 backdrop-blur">
                   <button
                     type="button"
-                    disabled={zoomDisabled}
-                    onClick={() => { void sendCommand('zoomIn'); }}
+                    disabled={zoomInDisabled}
+                    onClick={handleZoomIn}
                     className="flex h-7 w-7 items-center justify-center rounded-md bg-white/10 text-white disabled:opacity-50"
                   >
                     +
@@ -1040,13 +1272,13 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   <div className="relative h-[100px] w-1 rounded-full bg-white/15">
                     <div
                       className="absolute bottom-0 left-0 right-0 rounded-full bg-white"
-                      style={{ height: `${String(Math.min(100, Math.max(0, zoomLevel)))}%` }}
+                      style={{ height: `${String(Math.min(100, Math.max(0, zoomPercent)))}%` }}
                     />
                   </div>
                   <button
                     type="button"
-                    disabled={zoomDisabled}
-                    onClick={() => { void sendCommand('zoomOut'); }}
+                    disabled={zoomOutDisabled}
+                    onClick={handleZoomOut}
                     className="flex h-7 w-7 items-center justify-center rounded-md bg-white/10 text-white disabled:opacity-50"
                   >
                     −
@@ -1067,6 +1299,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   {[
                     { k: translate({ key: 'aperture.monitor.panTilt' }), v: cameraState ? `${String(cameraState.pan)}° / ${String(cameraState.tilt)}°` : '—' },
                     { k: translate({ key: 'aperture.monitor.zoom' }), v: zoomLabel },
+                    { k: translate({ key: 'aperture.monitor.motion' }), v: motionLabel },
                     { k: translate({ key: 'aperture.monitor.frameAge' }), v: cameraState?.lastFrameAgeMs !== null && cameraState?.lastFrameAgeMs !== undefined ? `${String(cameraState.lastFrameAgeMs)} ms` : '—' },
                     { k: translate({ key: 'aperture.monitor.lastCommand' }), v: lastCommandResult ? `${lastCommandResult.action} · ${lastCommandResult.result}` : '—' },
                   ].map((row, index, list) => (

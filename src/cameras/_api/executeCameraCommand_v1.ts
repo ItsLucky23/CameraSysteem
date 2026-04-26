@@ -9,8 +9,15 @@ import {
   isCameraAction,
   isStubCameraAction,
 } from '../../../server/utils/cameraHelpers';
+import { assertCallerIsController } from '../../../server/utils/cameraControlSession';
 
-export const rateLimit: number | false = 90;
+export const rateLimit: number | false = 240;
+
+// PTZ commands need to flow at ~5 Hz when the user holds a button. Other
+// commands are click-once toggles and need no per-action lock — the control
+// session already gates who can send them.
+const PTZ_ACTIONS = new Set(['panLeft', 'panRight', 'tiltUp', 'tiltDown']);
+const PTZ_LOCK_TTL_MS = 200;
 
 export const auth: AuthProps = {
   login: true,
@@ -81,6 +88,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
     if (!canControlCamera({ isAdmin: user.admin, access: stubAccess })) {
       return { status: 'error', errorCode: 'camera.controlDenied', httpStatus: 403 };
+    }
+
+    const stubController = await assertCallerIsController({ cameraId, userId: user.id });
+    if (!stubController) {
+      return { status: 'error', errorCode: 'camera.notControlling', httpStatus: 409 };
     }
 
     const [stubDispatchError, stubDispatchResult] = await tryCatch(async () => {
@@ -165,42 +177,61 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'camera.controlDenied', httpStatus: 403 };
   }
 
-  const [lockError, lockResult] = await tryCatch(async () => {
-    return acquireCameraActionLock({
-      cameraId,
-      action: actionValue,
-      userId: user.id,
-      commandId,
-      ttlMs: 3000,
-    });
-  });
-
-  if (lockError || !lockResult) {
-    return { status: 'error', errorCode: 'camera.commandFailed', httpStatus: 500 };
+  const controller = await assertCallerIsController({ cameraId, userId: user.id });
+  if (!controller) {
+    return { status: 'error', errorCode: 'camera.notControlling', httpStatus: 409 };
   }
 
-  if (!lockResult.acquired) {
-    emitCameraSyncEvent({
-      fullName: 'sync/cameras/cameraCommandResult/v1',
-      receiver: roomCode,
-      serverOutput: {
-        status: 'success',
+  // Per-action lock kept only for PTZ commands so a held button at 250ms
+  // cadence doesn't outpace the servo. All other commands are click-once
+  // toggles where the control session is the only gate they need.
+  const isPtz = PTZ_ACTIONS.has(actionValue);
+  const lockTtlMs = isPtz ? PTZ_LOCK_TTL_MS : 0;
+
+  let lockResult: Awaited<ReturnType<typeof acquireCameraActionLock>> | null = null;
+  if (lockTtlMs > 0) {
+    const [lockError, result] = await tryCatch(async () => {
+      return acquireCameraActionLock({
         cameraId,
-        commandId,
         action: actionValue,
-        result: 'rejected',
-        cooldownUntil: lockResult.lockUntil,
-        reasonCode: 'camera.locked',
-      },
+        userId: user.id,
+        commandId,
+        ttlMs: lockTtlMs,
+      });
     });
 
-    return {
-      status: 'error',
-      errorCode: 'camera.locked',
-      errorParams: [{ key: 'seconds', value: lockResult.cooldownSeconds }],
-      httpStatus: 409,
-    };
+    if (lockError || !result) {
+      return { status: 'error', errorCode: 'camera.commandFailed', httpStatus: 500 };
+    }
+
+    if (!result.acquired) {
+      emitCameraSyncEvent({
+        fullName: 'sync/cameras/cameraCommandResult/v1',
+        receiver: roomCode,
+        serverOutput: {
+          status: 'success',
+          cameraId,
+          commandId,
+          action: actionValue,
+          result: 'rejected',
+          cooldownUntil: result.lockUntil,
+          reasonCode: 'camera.locked',
+        },
+      });
+
+      return {
+        status: 'error',
+        errorCode: 'camera.locked',
+        errorParams: [{ key: 'seconds', value: result.cooldownSeconds }],
+        httpStatus: 409,
+      };
+    }
+
+    lockResult = result;
   }
+
+  const lockUntilIso = lockResult ? lockResult.lockUntil : new Date().toISOString();
+  const cooldownMs = lockResult ? lockResult.cooldownMs : 0;
 
   const [commandCreateError] = await tryCatch(async () => {
     return functions.db.prisma.cameraCommand.create({
@@ -211,7 +242,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
         action: actionValue,
         payloadJson: JSON.stringify(payload),
         status: 'accepted',
-        cooldownMs: lockResult.cooldownMs,
+        cooldownMs,
       },
     });
   });
@@ -285,7 +316,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       commandId,
       action: actionValue,
       result: 'accepted',
-      cooldownUntil: lockResult.lockUntil,
+      cooldownUntil: lockUntilIso,
     },
   });
 
@@ -296,7 +327,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       cameraId,
       action: actionValue,
       status: 'accepted',
-      lockUntil: lockResult.lockUntil,
+      lockUntil: lockUntilIso,
     },
   };
 };

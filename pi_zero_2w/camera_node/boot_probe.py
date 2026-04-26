@@ -102,7 +102,22 @@ def _probe_servo(label: str, gpio_pin: int | None) -> ProbeResult:
     return ("OK", f"GPIO {gpio_pin}", True)
 
 
-_CARD_LINE_RE = re.compile(r"^card\s+(\d+)\s*:", re.MULTILINE | re.IGNORECASE)
+_CARD_LINE_RE = re.compile(r"^card\s+(\d+)\s*:\s*([^\[]+?)\s*\[([^\]]*)\]", re.MULTILINE | re.IGNORECASE)
+
+# Built-in Pi audio devices that show up in `aplay -l` even with nothing
+# physically connected. We exclude these so the speaker probe only reports OK
+# when a real external sound card (USB, I2S DAC, etc.) is attached.
+_INTERNAL_AUDIO_TOKENS = (
+    "bcm2835",
+    "vc4hdmi",
+    "vc4-hdmi",
+    "headphones",
+)
+
+
+def _is_internal_card(name: str, label: str) -> bool:
+    haystack = f"{name} {label}".lower()
+    return any(token in haystack for token in _INTERNAL_AUDIO_TOKENS)
 
 
 def _probe_alsa(binary: str) -> ProbeResult:
@@ -125,7 +140,33 @@ def _probe_alsa(binary: str) -> ProbeResult:
     if not cards:
         return ("FAIL", "no device found", False)
 
-    return ("OK", f"{len(cards)} card(s) detected", True)
+    external = [c for c in cards if not _is_internal_card(c[1], c[2])]
+    if not external:
+        return ("FAIL", f"only built-in Pi audio detected ({len(cards)} card(s))", False)
+
+    return ("OK", f"{len(external)} external card(s) detected", True)
+
+
+def _probe_motion(motion_gpio_pin: int | None) -> ProbeResult:
+    if motion_gpio_pin is None:
+        return ("STUB", "no GPIO pin configured", False)
+
+    try:
+        from gpiozero import MotionSensor  # type: ignore
+    except Exception as error:  # noqa: BLE001
+        return ("FAIL", f"gpiozero import failed: {error}", False)
+
+    try:
+        sensor = MotionSensor(motion_gpio_pin)
+    except Exception as error:  # noqa: BLE001
+        return ("FAIL", f"GPIO {motion_gpio_pin} init failed: {error}", False)
+
+    try:
+        sensor.close()
+    except Exception:
+        pass
+
+    return ("OK", f"GPIO {motion_gpio_pin}", True)
 
 
 def _probe_temperature() -> ProbeResult:
@@ -171,6 +212,7 @@ def run_hardware_probe(
     ir_gpio_pin = getattr(adapter, "_ir_gpio_pin", None)
     pan_gpio_pin = getattr(adapter, "_pan_servo_gpio_pin", None)
     tilt_gpio_pin = getattr(adapter, "_tilt_servo_gpio_pin", None)
+    motion_gpio_pin = getattr(adapter, "_motion_gpio_pin", None)
 
     camera = _safe_probe(_probe_camera)
     ir = _safe_probe(_probe_ir, ir_gpio_pin)
@@ -178,7 +220,7 @@ def run_hardware_probe(
     tilt = _safe_probe(_probe_servo, "tilt servo", tilt_gpio_pin)
     microphone = _safe_probe(_probe_alsa, "arecord")
     speaker = _safe_probe(_probe_alsa, "aplay")
-    motion = ("STUB", "not implemented", False)
+    motion = _safe_probe(_probe_motion, motion_gpio_pin)
     temperature = _safe_probe(_probe_temperature)
 
     divider = "=" * 60

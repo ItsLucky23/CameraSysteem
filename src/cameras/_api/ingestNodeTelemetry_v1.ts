@@ -34,6 +34,7 @@ export interface ApiParams {
     tilt?: number;
     temperatureC?: number | null;
     motionDetected?: boolean;
+    lastMotionAt?: string | null;
     recording?: boolean;
     measuredFps?: number | null;
     lastFrameAgeMs?: number | null;
@@ -95,6 +96,7 @@ interface CameraStatePatch {
   temperatureC?: number | null;
   recording?: boolean;
   motionDetected?: boolean;
+  lastMotionAt?: string | null;
   measuredFps?: number | null;
   lastFrameAgeMs?: number | null;
   zoomLevel?: number | null;
@@ -133,6 +135,9 @@ const buildCameraPatch = ({
   }
   if (data.motionDetected !== undefined) {
     patch.motionDetected = data.motionDetected;
+  }
+  if (data.lastMotionAt !== undefined) {
+    patch.lastMotionAt = data.lastMotionAt;
   }
   if (data.recording !== undefined) {
     patch.recording = data.recording;
@@ -195,6 +200,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   }
 
   if (data.motionDetected !== undefined && typeof data.motionDetected !== 'boolean') {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (data.lastMotionAt !== undefined && data.lastMotionAt !== null && typeof data.lastMotionAt !== 'string') {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 

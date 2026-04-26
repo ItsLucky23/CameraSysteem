@@ -24,6 +24,7 @@ def build_adapter(settings: NodeSettings):
             ir_gpio_pin=settings.ir_gpio_pin,
             pan_servo_gpio_pin=settings.pan_servo_gpio_pin,
             tilt_servo_gpio_pin=settings.tilt_servo_gpio_pin,
+            motion_gpio_pin=settings.motion_gpio_pin,
             recording_start_command=settings.recording_start_command,
             recording_stop_command=settings.recording_stop_command,
         )

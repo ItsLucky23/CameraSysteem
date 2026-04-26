@@ -45,6 +45,7 @@ def to_ingest_payload(
         "tilt": state.tilt,
         "temperatureC": state.temperature_c,
         "motionDetected": state.motion_detected,
+        "lastMotionAt": state.last_motion_at,
         "recording": state.recording,
         "measuredFps": state.measured_fps,
         "lastFrameAgeMs": state.last_frame_age_ms,

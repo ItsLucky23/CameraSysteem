@@ -69,6 +69,7 @@ class NodeSettings:
     ir_gpio_pin: int | None
     pan_servo_gpio_pin: int | None
     tilt_servo_gpio_pin: int | None
+    motion_gpio_pin: int | None
     recording_start_command: str | None
     recording_stop_command: str | None
 
@@ -127,6 +128,7 @@ def load_settings() -> NodeSettings:
         ir_gpio_pin=_parse_optional_int(os.getenv("IR_GPIO_PIN")),
         pan_servo_gpio_pin=_parse_optional_int(os.getenv("PAN_SERVO_GPIO_PIN")),
         tilt_servo_gpio_pin=_parse_optional_int(os.getenv("TILT_SERVO_GPIO_PIN")),
+        motion_gpio_pin=_parse_optional_int(os.getenv("MOTION_GPIO_PIN")),
         recording_start_command=(os.getenv("RECORDING_START_COMMAND") or "").strip() or None,
         recording_stop_command=(os.getenv("RECORDING_STOP_COMMAND") or "").strip() or None,
     )

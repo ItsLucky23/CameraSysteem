@@ -14,6 +14,9 @@ class CameraState:
     tilt: int = 0
     temperature_c: float | None = None
     motion_detected: bool = False
+    # ISO-8601 UTC timestamp of the most recent PIR motion edge. None until
+    # the sensor first triggers (or stays None forever if no PIR is wired).
+    last_motion_at: str | None = None
     recording: bool = False
     # Live video pipeline stats. None when the stream is not running or
     # ffmpeg has not yet produced a stats line.
