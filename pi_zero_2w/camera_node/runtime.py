@@ -66,7 +66,6 @@ class CameraNodeRuntime:
 
                 self._thumbnail_publisher = ThumbnailPublisher(
                     api_client=self._api_client,
-                    is_video_active=self._is_video_active,
                     camera_ip=self._settings.camera_ip,
                     node_secret=self._settings.node_secret,
                 )
@@ -97,15 +96,6 @@ class CameraNodeRuntime:
         finally:
             await self._adapter.shutdown()
             logger.info("Camera node runtime stopped")
-
-    def _is_video_active(self) -> bool:
-        publisher = getattr(self._adapter, "_video_publisher", None)
-        if publisher is None:
-            return False
-        is_active = getattr(publisher, "is_active", None)
-        if not callable(is_active):
-            return False
-        return bool(is_active())
 
     async def _command_loop(self) -> None:
         while self._running:

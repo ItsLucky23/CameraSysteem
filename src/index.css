@@ -1,168 +1,187 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: #F5F5F5;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  --color-background: #FAFAF8;
 
   --color-container1: #FFFFFF;
-  --color-container1-hover: #F9F9F9;
-  --color-container1-border: #E5E5E5;
+  --color-container1-hover: #F7F6F2;
+  --color-container1-border: #ECEBE5;
 
-  --color-container2: #EFEFEF;
-  --color-container2-hover: #E5E5E5;
-  --color-container2-border: #Dcdcdc;
+  --color-container2: #F2F1EC;
+  --color-container2-hover: #EAE9E2;
+  --color-container2-border: #E2E0D7;
 
-  --color-title: #1E1F21;
-  --color-common: #454648;
+  --color-container3: #EAE9E2;
+  --color-container3-border: #DAD7CC;
+  --color-container3-hover: #E2E0D7;
 
-  /* color to layer over the primary color */
+  --color-container4: #F7F6F2;
+  --color-container4-border: #ECEBE5;
+  --color-container4-hover: #EAE9E2;
+
+  --color-title: #1A1A1A;
+  --color-common: #5A5A5A;
+  --color-muted: #8C8B82;
+
   --color-title-primary: #FFFFFF;
   --color-common-primary: #FFFFFF;
 
   --color-title-secondary: #FFFFFF;
   --color-common-secondary: #FFFFFF;
 
-  --color-primary: #3B82F6;
-  --color-primary-hover: #2563EB;
-  --color-primary-border: #1D4ED8;
+  --color-primary: #2D5BFF;
+  --color-primary-hover: #1E47E0;
+  --color-primary-border: #1736B8;
+  --color-primary-soft: #ECEFFF;
 
-  --color-secondary: #3B82F6;
-  --color-secondary-hover: #2563EB;
-  --color-secondary-border: #1D4ED8;
+  --color-secondary: #2D5BFF;
+  --color-secondary-hover: #1E47E0;
+  --color-secondary-border: #1736B8;
 
-  --color-correct: oklch(72.3% 0.219 149.579);
-  --color-correct-hover: oklch(62.7% 0.194 149.214);
+  --color-accent: #E8A87C;
+  --color-accent-soft: #FAF1EA;
 
-  --color-warning: oklch(79.5% 0.184 86.047);
-  --color-warning-hover: oklch(68.1% 0.162 75.834);
+  --color-correct: #1F9D55;
+  --color-correct-hover: #168548;
+  --color-correct-soft: #E8F5EC;
 
-  --color-wrong: oklch(63.7% 0.237 25.331);
-  --color-wrong-hover: oklch(57.7% 0.245 27.325);
+  --color-warning: #C9912D;
+  --color-warning-hover: #A87822;
+  --color-warning-soft: #FBF3DF;
+
+  --color-wrong: #C2342B;
+  --color-wrong-hover: #A22822;
+  --color-wrong-soft: #FAEAE8;
 }
 
 .dark {
-  --color-background: #231934;
+  --color-background: #1B1426;
 
-  --color-container1: #322844;
-  --color-container1-hover: #3D3251;
-  --color-container1-border: #443958;
+  --color-container1: #271C36;
+  --color-container1-hover: #322543;
+  --color-container1-border: #3A2D4D;
 
-  --color-container2: #373737;
-  --color-container2-hover: #454545;
-  --color-container2-border: #4A4A4A;
+  --color-container2: #1F1730;
+  --color-container2-hover: #281D3D;
+  --color-container2-border: #3A2D4D;
 
-  --color-title: #FFFFFF;
-  --color-common: #E0E0E0;
+  --color-container3: #2A1F44;
+  --color-container3-border: #3A2D4D;
+  --color-container3-hover: #322543;
 
-  --color-title-secondary: #FFFFFF;
-  --color-common-secondary: #E0E0E0;
+  --color-container4: #271C36;
+  --color-container4-border: #3A2D4D;
+  --color-container4-hover: #322543;
 
-  /* color to layer over the primary color */
-  --color-title-primary: #F1C4FD;
-  --color-common-primary: #FDFD8D;
+  --color-title: #F4EEFF;
+  --color-common: #C8BDD9;
+  --color-muted: #8E82A3;
 
-  --color-primary: #6800D8;
-  --color-primary-hover: #7A00FF;
-  --color-primary-border: #8B3DFF;
+  --color-title-secondary: #F4EEFF;
+  --color-common-secondary: #C8BDD9;
 
-  --color-secondary: #6800D8;
-  --color-secondary-hover: #7A00FF;
-  --color-secondary-border: #8B3DFF;
+  --color-title-primary: #FFFFFF;
+  --color-common-primary: #FFFFFF;
 
-  --color-correct: oklch(72.3% 0.219 149.579);
-  --color-correct-hover: oklch(62.7% 0.194 149.214);
+  --color-primary: #8B5DFF;
+  --color-primary-hover: #9F76FF;
+  --color-primary-border: #6B3DDB;
+  --color-primary-soft: #2A1F44;
 
-  --color-warning: oklch(79.5% 0.184 86.047);
-  --color-warning-hover: oklch(68.1% 0.162 75.834);
+  --color-secondary: #8B5DFF;
+  --color-secondary-hover: #9F76FF;
+  --color-secondary-border: #6B3DDB;
 
-  --color-wrong: oklch(63.7% 0.237 25.331);
-  --color-wrong-hover: oklch(57.7% 0.245 27.325);
+  --color-accent: #F1C4FD;
+  --color-accent-soft: #2E2240;
+
+  --color-correct: #4ADB85;
+  --color-correct-hover: #6AE69A;
+  --color-correct-soft: #1A2D24;
+
+  --color-warning: #E8B662;
+  --color-warning-hover: #F0C685;
+  --color-warning-soft: #2D2517;
+
+  --color-wrong: #E15A52;
+  --color-wrong-hover: #EB7872;
+  --color-wrong-soft: #2D1A1B;
 }
-
-/* @theme {
-  --color-background: #EFF6FF;
-
-  --color-container: #FFFFFF;
-  --color-container-border: #E5E7EB;
-  --color-container-hover: #F3F4F6;
-
-  --color-container2: #F8FAFC;
-  --color-container2-border: #E2E8F0;
-  --color-container2-hover: #F1F5F9;
-
-  --color-container3: #E5E7EB;
-  --color-container3-border: #CBD5E1;
-  --color-container3-hover: #D1D5DB;
-
-  --color-container4: #F1F5F9;
-  --color-container4-border: #E2E8F0;
-  --color-container4-hover: #E2E8F0;
-
-  --color-title: #000000;
-  --color-common: #1E293B;
-  --color-muted: #64748B;
-
-  --color-correct: #22C55E;
-  --color-correct-hover: #16A34A;
-
-  --color-wrong: #EF4444;
-  --color-wrong-hover: #DC2626;
-}
-
-.dark {
-  --color-background: #111827;
-
-  --color-container: #1F2937;
-  --color-container-border: #374151;
-  --color-container-hover: #3F4B63;
-
-  --color-container2: #374151;
-  --color-container2-border: #4B5563;
-  --color-container2-hover: #565E72;
-
-  --color-container3: #4B5563;
-  --color-container3-border: #6B7280;
-  --color-container3-hover: #272F41;
-
-  --color-container4: #1F2937;
-  --color-container4-border: #374151;
-  --color-container4-hover: #CBD5E1;
-
-  --color-title: #FFFFFF;
-  --color-common: #E5E7EB;
-  --color-muted: #9CA3AF;
-
-  --color-correct: #22C55E;
-  --color-correct-hover: #16A34A;
-
-  --color-wrong: #EF4444;
-  --color-wrong-hover: #DC2626;
-} */
 
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
 
   color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: white;
+  color: var(--color-title);
+  background-color: var(--color-background);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
 }
 
 html, body {
   margin: 0;
   width: 100%;
   height: 100%;
+  font-family: var(--font-sans);
 }
 
 @layer utilities {
   .h-safe {
     height: calc(var(--vh, 1vh) * 100);
   }
+
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  display: inline-block;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  word-wrap: normal;
+  white-space: nowrap;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+.thin-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--color-container2-border); border-radius: 999px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+.cam-placeholder {
+  background:
+    linear-gradient(45deg, rgba(0,0,0,0.04) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(0,0,0,0.04) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(0,0,0,0.04) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(0,0,0,0.04) 75%),
+    var(--color-container2);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0px;
 }
 
 @keyframes pulse-ring {

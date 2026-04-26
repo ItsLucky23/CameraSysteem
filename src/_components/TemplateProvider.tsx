@@ -18,6 +18,8 @@ import { useMenuHandler } from './MenuHandler';
 import useRouter from './Router';
 import ThemeToggler from './ThemeToggler';
 import { useTranslator } from '../_functions/translator';
+import MobileTabBar from './ui/MobileTabBar';
+import SideRail from './ui/SideRail';
 
 
 
@@ -25,9 +27,30 @@ const Templates = {
   dashboard: DashboardTemplate,
   home: HomeTemplate,
   ops: OpsTemplate,
+  aperture: ApertureTemplate,
   plain: PlainTemplate,
 }
-export type Template = 'dashboard' | 'plain' | 'home' | 'ops';
+export type Template = 'dashboard' | 'plain' | 'home' | 'ops' | 'aperture';
+
+function ApertureTemplate({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-full w-full flex-col bg-background text-title md:flex-row">
+      <div className="hidden md:block">
+        <SideRail />
+      </div>
+
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <Middleware>
+          {children}
+        </Middleware>
+      </div>
+
+      <div className="md:hidden">
+        <MobileTabBar />
+      </div>
+    </div>
+  );
+}
 
 function OpsTemplate({ children }: { children: React.ReactNode }) {
   const location = useLocation();

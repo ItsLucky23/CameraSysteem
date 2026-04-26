@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import { backendUrl, SessionLayout } from "config";
 
 import { useAvatarContext, AvatarStatus } from "./AvatarProvider";
@@ -52,7 +54,7 @@ const getAvatarStatusKey = (avatar?: string, fallbackName = '') => {
   return `${identity.avatarId}|${identity.refreshKey}`;
 };
 
-export default function Avatar({
+function AvatarInner({
   user,
   textSize,
 }: {
@@ -63,7 +65,7 @@ export default function Avatar({
 
   const avatarStatusKey = getAvatarStatusKey(user.avatar, user.name);
   const avatarStatus = avatarStatuses[avatarStatusKey];
-  
+
   const formattedName = user.name[0].toUpperCase();
 
   return user.avatar && avatarStatus !== 'fallback' ? (
@@ -72,6 +74,17 @@ export default function Avatar({
     <FallbackImg user={user} formattedName={formattedName} textSize={textSize} />
   );
 }
+
+// Memoize so context-only re-renders of the parent (session, socket-status,
+// translator) don't recreate the <img> node and trigger a visual flicker.
+const Avatar = memo(AvatarInner, (prev, next) => (
+  prev.textSize === next.textSize
+  && prev.user.name === next.user.name
+  && prev.user.avatar === next.user.avatar
+  && prev.user.avatarFallback === next.user.avatarFallback
+));
+
+export default Avatar;
 
 interface ImgProps {
   user: UserType;

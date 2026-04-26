@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Camera System · Hi-Fi UI</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded&display=swap" rel="stylesheet"/>
+
+<link rel="stylesheet" href="tokens.css"/>
+
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: var(--font-sans); }
+  .icon {
+    font-family: 'Material Symbols Rounded';
+    font-weight: 400; font-style: normal;
+    line-height: 1; letter-spacing: normal; text-transform: none;
+    display: inline-flex; white-space: nowrap; word-wrap: normal;
+    direction: ltr; -webkit-font-feature-settings: 'liga'; font-feature-settings: 'liga';
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-display { font-family: var(--font-display); letter-spacing: -0.015em; font-weight: 400; }
+  .font-mono { font-family: var(--font-mono); }
+  .label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--color-muted);
+  }
+  .app-surface {
+    background: var(--color-background);
+    color: var(--color-title);
+    font-family: var(--font-sans);
+    font-size: 14px;
+  }
+  .surface {
+    background: var(--color-container1);
+    border: 1px solid var(--color-container1-border);
+    border-radius: 14px;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 36px; padding: 0 14px; border-radius: 9px;
+    border: 1px solid var(--color-container1-border);
+    background: var(--color-container1);
+    color: var(--color-title);
+    font-family: var(--font-sans);
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; transition: background 120ms, border-color 120ms;
+  }
+  .btn:hover { background: var(--color-container1-hover); }
+  .btn-primary {
+    background: var(--color-primary); border-color: var(--color-primary);
+    color: #fff;
+  }
+  .btn-primary:hover { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+  .btn-ghost { background: transparent; border-color: transparent; }
+  .btn-ghost:hover { background: var(--color-container2); }
+
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 8px; border-radius: 999px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .chip-correct  { background: var(--color-correct-soft); color: var(--color-correct); }
+  .chip-wrong    { background: var(--color-wrong-soft);   color: var(--color-wrong); }
+  .chip-warning  { background: var(--color-warning-soft); color: var(--color-warning); }
+  .chip-primary  { background: var(--color-primary-soft); color: var(--color-primary); }
+
+  .thin-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .thin-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 999px; }
+  .thin-scroll::-webkit-scrollbar-track { background: transparent; }
+
+  .cam-placeholder {
+    background:
+      repeating-linear-gradient(135deg, rgba(0,0,0,0.04) 0 8px, transparent 8px 16px),
+      var(--color-container2);
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="artboard-dashboard.jsx"></script>
+<script type="text/babel" src="artboard-monitor.jsx"></script>
+<script type="text/babel" src="artboard-auth.jsx"></script>
+<script type="text/babel" src="artboard-settings.jsx"></script>
+<script type="text/babel" src="artboard-admin.jsx"></script>
+<script type="text/babel" src="artboard-recordings.jsx"></script>
+<script type="text/babel" src="artboard-mobile.jsx"></script>
+
+<script type="text/babel">
+  const { DesignCanvas, DCSection, DCArtboard, DCPostIt } = window;
+
+  function App() {
+    const W = 1440, H = 900;
+    return (
+      <DesignCanvas>
+        <DCSection id="overview" title="Aperture · Camera Control" subtitle="A hi-fi redesign of every page in the codebase. Editorial serif headlines + Inter UI, warm neutrals, calm status colors. Drag a card by its grip to reorder; click a label or the ⤢ button to focus.">
+          <DCArtboard id="dashboard" label="01 · Dashboard / Overview" width={W} height={H}>
+            <window.DashboardArtboard/>
+          </DCArtboard>
+          <DCArtboard id="monitor" label="02 · Live Camera Monitor" width={W} height={H}>
+            <window.MonitorArtboard/>
+          </DCArtboard>
+          <DCArtboard id="admin" label="03 · Camera Admin" width={W} height={H}>
+            <window.AdminArtboard/>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="ops" title="Operations & Account" subtitle="Per-user permission grid, account settings, and the gateway sign-in.">
+          <DCArtboard id="access" label="04 · Camera Access Matrix" width={W} height={H}>
+            <window.AccessArtboard/>
+          </DCArtboard>
+          <DCArtboard id="settings" label="05 · Settings" width={W} height={H}>
+            <window.SettingsArtboard/>
+          </DCArtboard>
+          <DCArtboard id="auth" label="06 · Sign In" width={W} height={H}>
+            <window.AuthArtboard/>
+          </DCArtboard>
+          <DCArtboard id="recordings" label="07 · Recordings" width={W} height={H}>
+            <window.RecordingsArtboard/>
+          </DCArtboard>
+        </DCSection>
+
+        <DCSection id="mobile" title="Mobile companion" subtitle="Every desktop page reflowed for night-shift glance & field operations. Multi-screen flows shown side-by-side.">
+          <DCArtboard id="m-trio" label="01 · Dashboard · Live · Sign in" width={1180} height={880}>
+            <window.MobileTrio/>
+          </DCArtboard>
+          <DCArtboard id="m-monitor" label="02 · Live monitor + Recordings" width={820} height={880}>
+            <window.MobileMonitorPair/>
+          </DCArtboard>
+          <DCArtboard id="m-admin" label="03 · Admin: list + edit" width={820} height={880}>
+            <window.MobileAdminPair/>
+          </DCArtboard>
+          <DCArtboard id="m-access" label="04 · Access: users + matrix" width={820} height={880}>
+            <window.MobileAccessPair/>
+          </DCArtboard>
+          <DCArtboard id="m-settings" label="05 · Settings: index + appearance" width={820} height={880}>
+            <window.MobileSettingsPair/>
+          </DCArtboard>
+        </DCSection>
+      </DesignCanvas>
+    );
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>

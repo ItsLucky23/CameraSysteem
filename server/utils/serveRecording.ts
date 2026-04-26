@@ -33,7 +33,18 @@ export const serveRecording = async (
     return;
   }
 
-  const token = extractTokenFromRequest(req);
+  // The <video src=...> element cannot send Authorization headers. Accept a
+  // ?token=... query-string as a fallback so dev (sessionBasedToken=true)
+  // playback works. Cookie/Bearer modes still take precedence when present.
+  let token = extractTokenFromRequest(req);
+  if (!token) {
+    const rawUrl = req.url ?? '';
+    const queryIndex = rawUrl.indexOf('?');
+    if (queryIndex !== -1) {
+      const queryParams = new URLSearchParams(rawUrl.slice(queryIndex + 1));
+      token = queryParams.get('token');
+    }
+  }
   if (!token) {
     writeJson(res, 401, { status: 'error', errorCode: 'auth.required' });
     return;

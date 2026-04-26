@@ -23,6 +23,7 @@ import { handleHttpApiRequest } from './sockets/handleHttpApiRequest';
 import handleHttpSyncRequest from './sockets/handleHttpSyncRequest';
 import { checkRateLimit } from './utils/rateLimiter';
 import { RECORDING_STREAM_PATH_PREFIX, serveRecording } from './utils/serveRecording';
+import { RECORDING_THUMBNAIL_PATH_PREFIX, serveRecordingThumbnail } from './utils/serveRecordingThumbnail';
 
 const SESSION_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * (config.sessionExpiryDays || 7);
 const SESSION_COOKIE_OPTIONS = `HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_COOKIE_MAX_AGE_SECONDS}; ${process.env.SECURE == 'true' ? "Secure;" : ""}`;
@@ -244,6 +245,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
     //? the API system) because mp4 streaming requires HTTP Range support and
     //? a streamed response body, which the JSON-shaped API pipeline cannot
     //? express. Auth + canControl are validated inside serveRecording.
+  } else if (routePath.startsWith(RECORDING_THUMBNAIL_PATH_PREFIX)) {
+    return serveRecordingThumbnail(req, res, routePath);
+
   } else if (routePath.startsWith(RECORDING_STREAM_PATH_PREFIX)) {
     return serveRecording(req, res, routePath);
 

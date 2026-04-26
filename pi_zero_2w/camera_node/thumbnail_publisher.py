@@ -4,7 +4,6 @@ import asyncio
 import base64
 import logging
 from datetime import datetime, timezone
-from typing import Callable
 
 from camera_node.api_client import Pi5ApiClient, Pi5ApiError
 
@@ -23,24 +22,30 @@ RPICAM_TIMEOUT_MS = 200
 class ThumbnailPublisher:
     """
     Captures a JPEG every 30s with rpicam-jpeg and POSTs it to the Pi 5.
-    Skips capture while the video pipeline is active because rpicam-vid and
-    rpicam-jpeg cannot share the sensor.
+
+    Always attempts capture. When the video pipeline is active rpicam-jpeg will
+    fail to grab the sensor; in that case the Pi 5 takes over thumbnail
+    extraction by tapping the existing RTP stream (cameraThumbnailExtractor on
+    the server). This loop covers the idle case where no one is watching.
     """
 
     def __init__(
         self,
         *,
         api_client: Pi5ApiClient,
-        is_video_active: Callable[[], bool],
         camera_ip: str,
         node_secret: str,
     ) -> None:
         self._api_client = api_client
-        self._is_video_active = is_video_active
         self._camera_ip = camera_ip
         self._node_secret = node_secret
         self._cached_camera_id: str | None = None
         self._running = True
+        # Tracks whether the last capture attempt failed because the sensor is
+        # busy (rpicam-vid is streaming). The Pi 5 takes over thumbnail
+        # extraction via cameraThumbnailExtractor in that case, so per-attempt
+        # failure logs are pure noise — we log once on entry and once on exit.
+        self._sensor_busy_streak = False
 
     def remember_camera_id(self, camera_id: str | None) -> None:
         # Caller (runtime) feeds in the cameraId observed on the most recent
@@ -52,6 +57,11 @@ class ThumbnailPublisher:
         self._running = False
 
     async def run(self) -> None:
+        # Fire one immediate capture so the dashboard / admin pages have a
+        # photo within seconds of the Pi Zero booting, instead of waiting a
+        # full 30s for the first loop tick.
+        await self._capture_and_publish()
+
         while self._running:
             try:
                 await asyncio.sleep(THUMBNAIL_INTERVAL_SEC)
@@ -61,23 +71,13 @@ class ThumbnailPublisher:
             if not self._running:
                 return
 
-            try:
-                video_active = self._is_video_active()
-            except Exception as error:  # noqa: BLE001
-                # If the probe itself fails, treat as inactive so we still try
-                # to capture rather than skipping forever.
-                logger.warning("Video-active probe raised: %s", error)
-                video_active = False
+            await self._capture_and_publish()
 
-            if video_active:
-                print("[thumbnail] skipped (video stream active)")
-                continue
-
-            jpeg_bytes = await self._capture_jpeg()
-            if jpeg_bytes is None:
-                continue
-
-            await self._publish(jpeg_bytes)
+    async def _capture_and_publish(self) -> None:
+        jpeg_bytes = await self._capture_jpeg()
+        if jpeg_bytes is None:
+            return
+        await self._publish(jpeg_bytes)
 
     async def _capture_jpeg(self) -> bytes | None:
         try:
@@ -119,21 +119,49 @@ class ThumbnailPublisher:
             raise
 
         if process.returncode != 0:
-            stderr_tail = (stderr or b"").decode(errors="replace").strip().splitlines()
+            stderr_text = (stderr or b"").decode(errors="replace")
+            stderr_tail = stderr_text.strip().splitlines()
             detail = stderr_tail[-1] if stderr_tail else f"exit={process.returncode}"
-            print(f"[thumbnail] capture failed: {detail}")
+            self._report_capture_failure(detail, stderr_text)
             return None
 
         if not stdout:
-            print("[thumbnail] capture failed: empty stdout")
+            self._report_capture_failure("empty stdout", "")
             return None
 
         # Sanity check: JPEG magic bytes
         if not stdout.startswith(b"\xff\xd8\xff"):
-            print("[thumbnail] capture failed: stdout is not JPEG")
+            self._report_capture_failure("stdout is not JPEG", "")
             return None
 
+        if self._sensor_busy_streak:
+            print("[thumbnail] sensor reclaimed; resuming local captures")
+            self._sensor_busy_streak = False
+
         return stdout
+
+    def _report_capture_failure(self, detail: str, stderr_text: str) -> None:
+        # When rpicam-vid is streaming the sensor is locked; rpicam-jpeg fails
+        # with "Device or resource busy" / "Failed to acquire camera". The Pi
+        # 5 already extracts thumbnails from the RTP stream in this case, so
+        # we suppress per-attempt logs and emit one transition line instead.
+        haystack = f"{detail}\n{stderr_text}".lower()
+        sensor_busy = (
+            "device or resource busy" in haystack
+            or "failed to acquire camera" in haystack
+            or "camera in use" in haystack
+        )
+
+        if sensor_busy:
+            if not self._sensor_busy_streak:
+                print("[thumbnail] sensor busy (video stream active); Pi 5 will extract from RTP")
+                self._sensor_busy_streak = True
+            return
+
+        # Real failure (rpicam-jpeg missing, timeout, corrupt output, etc.) —
+        # always log so it shows up in journalctl.
+        self._sensor_busy_streak = False
+        print(f"[thumbnail] capture failed: {detail}")
 
     async def _publish(self, jpeg_bytes: bytes) -> None:
         captured_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
 import { createRoot } from 'react-dom/client'
-import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom'
+import { createBrowserRouter, Outlet, RouterProvider, useParams, useSearchParams } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import 'src/index.css'
 import 'src/scrollbar.css'
@@ -34,6 +34,12 @@ interface PageModule {
   template?: Template;
 }
 
+interface CollectedRoute {
+  path: string;
+  template: Template;
+  Page: React.ComponentType<PageProps>;
+}
+
 // Wrapper to inject Next.js-style params and searchParams as props
 const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
   const params = useParams();
@@ -43,8 +49,8 @@ const PageWrapper = ({ Page }: { Page: React.ComponentType<PageProps> }) => {
   return <Page params={params} searchParams={searchParamsObj} />;
 };
 
-const getRoutes = (pages: Record<string, PageModule>) => {
-  const routes = [];
+const collectRoutes = (pages: Record<string, PageModule>): CollectedRoute[] => {
+  const routes: CollectedRoute[] = [];
   for (const path in pages) {
     const module = pages[path];
 
@@ -64,20 +70,53 @@ const getRoutes = (pages: Record<string, PageModule>) => {
     // eslint-disable-next-line unicorn/prefer-string-replace-all
     const finalPath = subPath.replace(/\[([^\]]+)\]/g, ':$1');
 
-    const template = module.template ?? 'plain';
-    const Page = module.default;
-
     routes.push({
       path: finalPath,
-      element: (
-        <TemplateProvider key={`${template}-${subPath}`} initialTemplate={template}>
-          <PageWrapper Page={Page} />
-        </TemplateProvider>
-      ),
+      template: module.template ?? 'plain',
+      Page: module.default,
     });
   }
-
   return routes;
+};
+
+// Group routes by template so each template's layout (SideRail, Avatar, etc.)
+// mounts once and persists across navigations within the group, instead of
+// remounting per-route via key={template-subPath}.
+const buildRouterRoutes = (collected: CollectedRoute[]) => {
+  const byTemplate = new Map<Template, CollectedRoute[]>();
+  for (const route of collected) {
+    const list = byTemplate.get(route.template) ?? [];
+    list.push(route);
+    byTemplate.set(route.template, list);
+  }
+
+  interface LayoutChildRoute {
+    path: string;
+    element: JSX.Element;
+  }
+  interface LayoutRoute {
+    element: JSX.Element;
+    children: LayoutChildRoute[];
+  }
+  interface CatchAllRoute {
+    path: string;
+    element: JSX.Element;
+  }
+  const layoutRoutes: (LayoutRoute | CatchAllRoute)[] = [];
+  for (const [template, group] of byTemplate.entries()) {
+    layoutRoutes.push({
+      element: (
+        <TemplateProvider initialTemplate={template}>
+          <Outlet />
+        </TemplateProvider>
+      ),
+      children: group.map((route) => ({
+        path: route.path,
+        element: <PageWrapper Page={route.Page} />,
+      })),
+    });
+  }
+  return layoutRoutes;
 };
 
 const prodPages = import.meta.glob([
@@ -103,7 +142,9 @@ const pagesUnknown = import.meta.env.PROD ? prodPages : devPages;
 
 const pages: Record<string, PageModule> = pagesUnknown as Record<string, PageModule>;
 
-const routes = getRoutes(pages);
+const collected = collectRoutes(pages);
+const routes = buildRouterRoutes(collected);
+
 routes.push({
   path: '*',
   element: (

@@ -12,6 +12,7 @@ import {
   startCameraIngest,
   stopCameraIngest,
 } from './cameraWebrtcBridge';
+import { cameraThumbnailExtractor } from './cameraThumbnailExtractor';
 
 const SYSTEM_USER_ID = '__system__';
 
@@ -235,6 +236,12 @@ const activateCamera = async ({
   activatedCameraIds.add(cameraId);
   cameraIpById.set(cameraId, cameraIp);
   ensureReconciler();
+
+  // Spin up the Pi 5-side thumbnail extractor so dashboard / admin / cameras
+  // page tiles get fresh JPEGs while the Pi Zero's sensor is locked by
+  // rpicam-vid. ffmpeg taps the bridge's RTP fan-out, so no impact on the Pi
+  // Zero pipeline. Idempotent — safe to call on re-activation.
+  void cameraThumbnailExtractor.start(cameraId);
 };
 
 const deactivateCamera = async ({
@@ -246,6 +253,10 @@ const deactivateCamera = async ({
 }): Promise<void> => {
   activatedCameraIds.delete(cameraId);
   cameraIpById.delete(cameraId);
+
+  // Stop the extractor BEFORE tearing down ingest so it can drain its last
+  // chunk cleanly. Awaiting also gives ffmpeg a chance to flush.
+  await cameraThumbnailExtractor.stop(cameraId);
 
   await tryCatch(async () => {
     return enqueueCommand({
