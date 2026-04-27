@@ -34,6 +34,14 @@ interface OrchestratorSingletonState {
   // stream active as long as a reservation is held, even if no browser sockets
   // are connected.
   recordingReservations: Set<string>;
+  // Per-camera timestamp of the most recent kickPiZeroStream call. Throttle
+  // gate that prevents stop/start storms when the Pi Zero pipeline is in a
+  // bad state (libcamera V4L2 errors, undervoltage, sensor cable hiccup) and
+  // can't recover within one stall-threshold window. Without this, every
+  // reconcile + activateCamera trigger stacks another stop/start pair on the
+  // Pi Zero command queue, which extends the gap further and causes another
+  // kick on the next tick — runaway feedback loop.
+  lastKickAtByCameraId: Map<string, number>;
 }
 
 const ORCHESTRATOR_SINGLETON_KEY = '__luckyStackCameraStreamOrchestratorState__';
@@ -49,12 +57,16 @@ const orchestratorState: OrchestratorSingletonState = orchestratorScope[ORCHESTR
   cameraIpById: new Map<string, string>(),
   pendingDeactivationTimer: null,
   recordingReservations: new Set<string>(),
+  lastKickAtByCameraId: new Map<string, number>(),
 };
 
-// Backfill on HMR: an existing singleton from before this field was added
-// won't carry recordingReservations, so initialize it lazily.
+// Backfill on HMR: an existing singleton from before these fields were added
+// won't carry them, so initialize lazily.
 if (!orchestratorState.recordingReservations) {
   orchestratorState.recordingReservations = new Set<string>();
+}
+if (!orchestratorState.lastKickAtByCameraId) {
+  orchestratorState.lastKickAtByCameraId = new Map<string, number>();
 }
 
 if (!orchestratorScope[ORCHESTRATOR_SINGLETON_KEY]) {
@@ -77,9 +89,17 @@ const recordingReservations = orchestratorState.recordingReservations;
 // Pi Zero 2W: libcamera init + IPA tuning load + sensor mode select takes ~10s
 // before the first frame leaves the encoder. Setting this too low causes the
 // reconciler to re-kick the pipeline before it has finished warming up, which
-// produces an infinite stop/start loop. 20s gives enough slack on slow boots.
-const STREAM_STALL_THRESHOLD_MS = 20000;
+// produces an infinite stop/start loop. 40s gives enough slack on slow boots
+// and on transient libcamera V4L2 buffer errors that recover by themselves.
+const STREAM_STALL_THRESHOLD_MS = 40000;
 const RECONCILE_INTERVAL_MS = 4000;
+
+// Hard floor between successive kicks of the same camera. Even if the
+// reconciler and an activateCamera force-kick both decide the stream is
+// stale at nearly the same moment, only one stop/start pair gets sent until
+// this window elapses. Has to comfortably exceed STREAM_STALL_THRESHOLD_MS so
+// the cold-start has time to actually produce its first packet.
+const MIN_KICK_INTERVAL_MS = 60000;
 
 // When the last connected socket leaves, hold off tearing down the Pi Zero
 // pipeline for this long. Real-world client sockets flap intermittently
@@ -253,6 +273,10 @@ const deactivateCamera = async ({
 }): Promise<void> => {
   activatedCameraIds.delete(cameraId);
   cameraIpById.delete(cameraId);
+  // Clear the kick throttle so a fresh activation later starts with a clean
+  // slate. Without this, a camera that flapped down and back up would still
+  // be in a 60s cooldown from its last kick.
+  orchestratorState.lastKickAtByCameraId.delete(cameraId);
 
   // Stop the extractor BEFORE tearing down ingest so it can drain its last
   // chunk cleanly. Awaiting also gives ffmpeg a chance to flush.
@@ -283,6 +307,23 @@ const kickPiZeroStream = async ({
   cameraId: string;
   cameraIp: string;
 }): Promise<void> => {
+  // Throttle: never kick the same camera twice within MIN_KICK_INTERVAL_MS.
+  // Catches the runaway case where libcamera is in a bad state and the next
+  // stop/start would just stack on the Pi Zero queue without any chance of
+  // recovery before the next reconcile tick. The Pi Zero (or sensor cable,
+  // or supply) needs human attention if a single kick didn't help.
+  const lastKickAt = orchestratorState.lastKickAtByCameraId.get(cameraId);
+  if (lastKickAt !== undefined) {
+    const sinceLastKickMs = Date.now() - lastKickAt;
+    if (sinceLastKickMs < MIN_KICK_INTERVAL_MS) {
+      console.warn(
+        `[cam ${cameraId}] kick suppressed — last kick was ${String(sinceLastKickMs)}ms ago (< ${String(MIN_KICK_INTERVAL_MS)}ms throttle). Pi Zero may need a reboot or cable check.`,
+      );
+      return;
+    }
+  }
+  orchestratorState.lastKickAtByCameraId.set(cameraId, Date.now());
+
   const streamConfig = await fetchCameraStreamConfig(cameraId);
   if (!streamConfig) {
     console.error(`cameraStreamOrchestrator: kick aborted — no stream config for ${cameraId}`);
