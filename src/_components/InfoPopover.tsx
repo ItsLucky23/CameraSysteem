@@ -8,47 +8,79 @@ interface Props {
   ariaLabel?: string;
 }
 
-// Tiny informational popover. An (i) icon button toggles a small panel below
-// the icon (or above when there's not enough room downward). Click-outside
-// and Escape close it. Used inside form modals to explain what each field
-// controls without bloating the modal with always-visible text.
+interface PanelCoords {
+  top: number;
+  left: number;
+  openUpward: boolean;
+}
+
+const PANEL_WIDTH = 288;
+const PANEL_GAP = 8;
+
+// Tiny informational popover. An (i) icon button toggles a small panel near
+// the icon. The panel is rendered with position: fixed so it escapes any
+// scroll/overflow container (e.g., a modal body with overflow-y-auto). Click
+// outside and Escape close it.
 export default function InfoPopover({ title, body, ariaLabel }: Props) {
   const [open, setOpen] = useState(false);
-  const [openUpward, setOpenUpward] = useState(false);
+  const [coords, setCoords] = useState<PanelCoords | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  const computeCoords = (): PanelCoords | null => {
+    const button = buttonRef.current;
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUpward = spaceBelow < 220;
+    const top = openUpward ? rect.top - PANEL_GAP : rect.bottom + PANEL_GAP;
+    // Anchor the right edge of the panel to the right edge of the trigger so
+    // labels next to the (i) icon don't get covered.
+    let left = rect.right - PANEL_WIDTH;
+    // Keep the panel inside the viewport horizontally.
+    if (left < 8) left = 8;
+    if (left + PANEL_WIDTH > window.innerWidth - 8) {
+      left = window.innerWidth - PANEL_WIDTH - 8;
+    }
+    return { top, left, openUpward };
+  };
 
   useEffect(() => {
-    if (!open) return undefined;
-
-    // Decide which way to open based on remaining viewport space below the
-    // trigger. Re-runs every time the popover opens so window resizes don't
-    // matter — nothing renders before this effect on the open transition.
-    if (buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      setOpenUpward(spaceBelow < 220);
+    if (!open) {
+      setCoords(null);
+      return undefined;
     }
 
+    setCoords(computeCoords());
+
     const handlePointerDown = (event: PointerEvent) => {
-      if (!wrapperRef.current) return;
-      if (wrapperRef.current.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      if (wrapperRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
       setOpen(false);
     };
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
     };
+    const handleReposition = () => {
+      setCoords(computeCoords());
+    };
 
     document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('keydown', handleKey);
+    window.addEventListener('resize', handleReposition);
+    window.addEventListener('scroll', handleReposition, true);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('resize', handleReposition);
+      window.removeEventListener('scroll', handleReposition, true);
     };
   }, [open]);
 
   return (
-    <div ref={wrapperRef} className={`relative inline-flex`}>
+    <div ref={wrapperRef} className="relative inline-flex">
       <button
         ref={buttonRef}
         type="button"
@@ -59,10 +91,18 @@ export default function InfoPopover({ title, body, ariaLabel }: Props) {
       >
         <MaterialIcon name="info" size={14} />
       </button>
-      {open && (
+      {open && coords && (
         <div
+          ref={panelRef}
           role="tooltip"
-          className={`absolute right-0 z-50 w-72 rounded-xl border border-container2-border bg-container2 p-3 shadow-lg ${openUpward ? 'bottom-full mb-2' : 'top-full mt-2'}`}
+          style={{
+            position: 'fixed',
+            top: coords.openUpward ? undefined : coords.top,
+            bottom: coords.openUpward ? window.innerHeight - coords.top : undefined,
+            left: coords.left,
+            width: PANEL_WIDTH,
+          }}
+          className="z-[1000] rounded-xl border border-container2-border bg-container2 p-3 shadow-lg"
         >
           <div className="mb-1.5 text-sm font-semibold text-title">{title}</div>
           <div className="space-y-2 text-xs leading-relaxed text-common">

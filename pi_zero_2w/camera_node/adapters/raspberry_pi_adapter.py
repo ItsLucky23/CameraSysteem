@@ -301,10 +301,17 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         # opens it with --metadata; if the stream is not running the file is
         # missing or stale and the controller falls back to no-lux behavior.
         metadata_path = VideoPublisher.metadata_file_path()
+        diagnosed_once = False
         try:
             while True:
                 await asyncio.sleep(LUX_SAMPLE_INTERVAL_S)
                 lux = self._read_latest_lux(metadata_path)
+                if lux is None and not diagnosed_once:
+                    # First miss diagnostics: the user usually wants to know
+                    # whether rpicam-vid is writing the file at all and what
+                    # the schema looks like. Logged once to avoid spamming.
+                    self._log_lux_diagnostics(metadata_path)
+                    diagnosed_once = True
                 if lux is None:
                     self._lux_smoothed = None
                 else:
@@ -314,11 +321,50 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                         self._lux_smoothed = (
                             LUX_EWMA_ALPHA * lux + (1.0 - LUX_EWMA_ALPHA) * self._lux_smoothed
                         )
+                # Always log a summary line so the user can tail journalctl and
+                # confirm the auto controller is alive and what it's seeing.
+                logger.info(
+                    "[ir-auto] lux=%s smoothed=%s mode=%s target=%s active=%s",
+                    f"{lux:.1f}" if lux is not None else "—",
+                    f"{self._lux_smoothed:.1f}" if self._lux_smoothed is not None else "—",
+                    self._state.ir_mode,
+                    self._ir_lux_target_strength,
+                    self._ir_active_strength,
+                )
                 self._evaluate_auto_ir()
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001
             logger.exception("Lux sampler loop crashed: %s", error)
+
+    @staticmethod
+    def _log_lux_diagnostics(metadata_path: str) -> None:
+        try:
+            stat = os.stat(metadata_path)
+        except FileNotFoundError:
+            logger.warning(
+                "[ir-auto] metadata file missing at %s — rpicam-vid may not support --metadata "
+                "or the stream is not running. Check `rpicam-vid --help | grep metadata`.",
+                metadata_path,
+            )
+            return
+        except OSError as error:
+            logger.warning("[ir-auto] cannot stat metadata file %s: %s", metadata_path, error)
+            return
+
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as handle:
+                head = handle.read(2048)
+        except OSError as error:
+            logger.warning("[ir-auto] cannot read metadata file %s: %s", metadata_path, error)
+            return
+
+        logger.warning(
+            "[ir-auto] no Lux parsed from metadata file. size=%s mtime_age=%.1fs head=%r",
+            stat.st_size,
+            time.time() - stat.st_mtime,
+            head[:512],
+        )
 
     @staticmethod
     def _read_latest_lux(metadata_path: str) -> float | None:
