@@ -4,7 +4,9 @@ export interface Capabilities {
   hasPanTilt: boolean;
   hasMicrophone: boolean;
   hasSpeaker: boolean;
-  hasMotion: boolean;
+  // MOTION DETECTION LOGIC (start)
+  // hasMotion: boolean;
+  // MOTION DETECTION LOGIC (end)
   hasZoom: boolean;
   hasTemperature: boolean;
 }
@@ -44,7 +46,9 @@ export const capabilitiesEqual = (a: Capabilities | null, b: Capabilities | null
     && a.hasPanTilt === b.hasPanTilt
     && a.hasMicrophone === b.hasMicrophone
     && a.hasSpeaker === b.hasSpeaker
-    && a.hasMotion === b.hasMotion
+    // MOTION DETECTION LOGIC (start)
+    // && a.hasMotion === b.hasMotion
+    // MOTION DETECTION LOGIC (end)
     && a.hasZoom === b.hasZoom
     && a.hasTemperature === b.hasTemperature
   );

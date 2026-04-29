@@ -73,7 +73,7 @@ def _probe_ir(ir_gpio_pin: int | None) -> ProbeResult:
     except Exception:
         pass
 
-    return ("OK", f"GPIO {ir_gpio_pin}", True)
+    return ("OK", f"GPIO {ir_gpio_pin} (pin claim ok — wiring not verified)", True)
 
 
 def _probe_servo(label: str, gpio_pin: int | None) -> ProbeResult:
@@ -147,26 +147,28 @@ def _probe_alsa(binary: str) -> ProbeResult:
     return ("OK", f"{len(external)} external card(s) detected", True)
 
 
-def _probe_motion(motion_gpio_pin: int | None) -> ProbeResult:
-    if motion_gpio_pin is None:
-        return ("STUB", "no GPIO pin configured", False)
-
-    try:
-        from gpiozero import MotionSensor  # type: ignore
-    except Exception as error:  # noqa: BLE001
-        return ("FAIL", f"gpiozero import failed: {error}", False)
-
-    try:
-        sensor = MotionSensor(motion_gpio_pin)
-    except Exception as error:  # noqa: BLE001
-        return ("FAIL", f"GPIO {motion_gpio_pin} init failed: {error}", False)
-
-    try:
-        sensor.close()
-    except Exception:
-        pass
-
-    return ("OK", f"GPIO {motion_gpio_pin}", True)
+# MOTION DETECTION LOGIC (start)
+# def _probe_motion(motion_gpio_pin: int | None) -> ProbeResult:
+#     if motion_gpio_pin is None:
+#         return ("STUB", "no GPIO pin configured", False)
+#
+#     try:
+#         from gpiozero import MotionSensor  # type: ignore
+#     except Exception as error:  # noqa: BLE001
+#         return ("FAIL", f"gpiozero import failed: {error}", False)
+#
+#     try:
+#         sensor = MotionSensor(motion_gpio_pin)
+#     except Exception as error:  # noqa: BLE001
+#         return ("FAIL", f"GPIO {motion_gpio_pin} init failed: {error}", False)
+#
+#     try:
+#         sensor.close()
+#     except Exception:
+#         pass
+#
+#     return ("OK", f"GPIO {motion_gpio_pin}", True)
+# MOTION DETECTION LOGIC (end)
 
 
 def _probe_temperature() -> ProbeResult:
@@ -212,7 +214,9 @@ def run_hardware_probe(
     ir_gpio_pin = getattr(adapter, "_ir_gpio_pin", None)
     pan_gpio_pin = getattr(adapter, "_pan_servo_gpio_pin", None)
     tilt_gpio_pin = getattr(adapter, "_tilt_servo_gpio_pin", None)
-    motion_gpio_pin = getattr(adapter, "_motion_gpio_pin", None)
+    # MOTION DETECTION LOGIC (start)
+    # motion_gpio_pin = getattr(adapter, "_motion_gpio_pin", None)
+    # MOTION DETECTION LOGIC (end)
 
     camera = _safe_probe(_probe_camera)
     ir = _safe_probe(_probe_ir, ir_gpio_pin)
@@ -220,7 +224,9 @@ def run_hardware_probe(
     tilt = _safe_probe(_probe_servo, "tilt servo", tilt_gpio_pin)
     microphone = _safe_probe(_probe_alsa, "arecord")
     speaker = _safe_probe(_probe_alsa, "aplay")
-    motion = _safe_probe(_probe_motion, motion_gpio_pin)
+    # MOTION DETECTION LOGIC (start)
+    # motion = _safe_probe(_probe_motion, motion_gpio_pin)
+    # MOTION DETECTION LOGIC (end)
     temperature = _safe_probe(_probe_temperature)
 
     divider = "=" * 60
@@ -237,7 +243,9 @@ def run_hardware_probe(
         _format_line("tilt servo", tilt[0], tilt[1]),
         _format_line("microphone", microphone[0], microphone[1]),
         _format_line("speaker", speaker[0], speaker[1]),
-        _format_line("motion detection", motion[0], motion[1]),
+        # MOTION DETECTION LOGIC (start)
+        # _format_line("motion detection", motion[0], motion[1]),
+        # MOTION DETECTION LOGIC (end)
         _format_line("temperature", temperature[0], temperature[1]),
         divider,
         "",
@@ -252,7 +260,9 @@ def run_hardware_probe(
         has_pan_tilt=pan[2] and tilt[2],
         has_microphone=microphone[2],
         has_speaker=speaker[2],
-        has_motion=motion[2],
+        # MOTION DETECTION LOGIC (start) — paused, always reports False
+        has_motion=False,
+        # MOTION DETECTION LOGIC (end)
         has_zoom=False,
         has_temperature=temperature[2],
     )

@@ -79,8 +79,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       tilt: camera.tilt,
       temperatureC: camera.temperatureC ?? null,
       recording: latestSnapshot?.recording ?? camera.mode === 'record',
-      motionDetected: latestSnapshot?.motionDetected ?? false,
+      // MOTION DETECTION LOGIC (start) — response type may still require these; hardcoded false/null while paused
+      motionDetected: false,
       lastMotionAt: null,
+      // MOTION DETECTION LOGIC (end)
       measuredFps: null,
       lastFrameAgeMs: null,
       zoomLevel: null,

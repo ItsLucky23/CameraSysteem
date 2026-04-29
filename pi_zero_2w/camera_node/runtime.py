@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import socket
 import time
@@ -60,6 +61,23 @@ class CameraNodeRuntime:
             self._capabilities = None
 
         await self._adapter.startup()
+
+        # Hands-free wiring confirmation: blink the IR LED twice when
+        # IR_BOOT_SELF_TEST=true so the installer can verify the MOSFET +
+        # ring without needing to load the cameras page.
+        if self._settings.ir_boot_self_test:
+            ir_device = getattr(self._adapter, "_ir_device", None)
+            if ir_device is not None:
+                logger.info("[ir-self-test] flashing IR LED")
+                for _ in range(2):
+                    with contextlib.suppress(Exception):
+                        ir_device.on()
+                    await asyncio.sleep(0.5)
+                    with contextlib.suppress(Exception):
+                        ir_device.off()
+                    await asyncio.sleep(0.25)
+            else:
+                logger.warning("[ir-self-test] flag set but adapter has no _ir_device — skipping")
 
         try:
             async with self._api_client:

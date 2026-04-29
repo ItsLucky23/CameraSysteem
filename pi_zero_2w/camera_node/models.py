@@ -13,6 +13,7 @@ class CameraState:
     pan: int = 0
     tilt: int = 0
     temperature_c: float | None = None
+    # MOTION DETECTION LOGIC (paused — these fields remain in the model but are never set true while paused)
     motion_detected: bool = False
     # ISO-8601 UTC timestamp of the most recent PIR motion edge. None until
     # the sensor first triggers (or stays None forever if no PIR is wired).

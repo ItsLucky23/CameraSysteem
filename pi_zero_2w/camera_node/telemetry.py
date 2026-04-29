@@ -44,8 +44,10 @@ def to_ingest_payload(
         "pan": state.pan,
         "tilt": state.tilt,
         "temperatureC": state.temperature_c,
-        "motionDetected": state.motion_detected,
-        "lastMotionAt": state.last_motion_at,
+        # MOTION DETECTION LOGIC (start)
+        # "motionDetected": state.motion_detected,
+        # "lastMotionAt": state.last_motion_at,
+        # MOTION DETECTION LOGIC (end)
         "recording": state.recording,
         "measuredFps": state.measured_fps,
         "lastFrameAgeMs": state.last_frame_age_ms,
@@ -61,7 +63,9 @@ def to_ingest_payload(
             "hasPanTilt": capabilities.has_pan_tilt,
             "hasMicrophone": capabilities.has_microphone,
             "hasSpeaker": capabilities.has_speaker,
-            "hasMotion": capabilities.has_motion,
+            # MOTION DETECTION LOGIC (start)
+            # "hasMotion": capabilities.has_motion,
+            # MOTION DETECTION LOGIC (end)
             "hasZoom": capabilities.has_zoom,
             "hasTemperature": capabilities.has_temperature,
         }

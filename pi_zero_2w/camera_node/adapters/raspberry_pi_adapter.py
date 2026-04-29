@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from datetime import datetime, timezone
+# MOTION DETECTION LOGIC (start) — datetime/timezone were only used by motion callbacks
+# from datetime import datetime, timezone
+# MOTION DETECTION LOGIC (end)
 
 from camera_node.adapters.base import HardwareAdapter
 from camera_node.models import CameraState
@@ -32,21 +34,27 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         ir_gpio_pin: int | None,
         pan_servo_gpio_pin: int | None,
         tilt_servo_gpio_pin: int | None,
-        motion_gpio_pin: int | None,
+        # MOTION DETECTION LOGIC (start)
+        # motion_gpio_pin: int | None,
+        # MOTION DETECTION LOGIC (end)
         recording_start_command: str | None,
         recording_stop_command: str | None,
     ) -> None:
         self._ir_gpio_pin = ir_gpio_pin
         self._pan_servo_gpio_pin = pan_servo_gpio_pin
         self._tilt_servo_gpio_pin = tilt_servo_gpio_pin
-        self._motion_gpio_pin = motion_gpio_pin
+        # MOTION DETECTION LOGIC (start)
+        # self._motion_gpio_pin = motion_gpio_pin
+        # MOTION DETECTION LOGIC (end)
         self._recording_start_command = recording_start_command
         self._recording_stop_command = recording_stop_command
 
         self._ir_device = None
         self._pan_servo = None
         self._tilt_servo = None
-        self._motion_sensor = None
+        # MOTION DETECTION LOGIC (start)
+        # self._motion_sensor = None
+        # MOTION DETECTION LOGIC (end)
         self._recording_process: asyncio.subprocess.Process | None = None
         self._video_publisher = VideoPublisher()
         self._talkback_enabled = False
@@ -59,8 +67,10 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             pan=0,
             tilt=0,
             temperature_c=None,
+            # MOTION DETECTION LOGIC (start) — paused; left as False/None literals
             motion_detected=False,
             last_motion_at=None,
+            # MOTION DETECTION LOGIC (end)
             recording=False,
             zoom_level=50,
         )
@@ -106,28 +116,32 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 logger.warning("Failed to initialize tilt SG90 servo: %s", error)
                 self._tilt_servo = None
 
-        if self._motion_gpio_pin is not None:
-            try:
-                from gpiozero import MotionSensor  # type: ignore
-                self._motion_sensor = MotionSensor(self._motion_gpio_pin)
-                # gpiozero invokes these from a background thread; we only
-                # mutate plain Python attributes so no asyncio handoff needed.
-                self._motion_sensor.when_motion = self._on_motion_detected
-                self._motion_sensor.when_no_motion = self._on_motion_cleared
-                # Seed initial state in case the sensor is already triggered.
-                self._state.motion_detected = bool(self._motion_sensor.motion_detected)
-                logger.info("PIR motion sensor initialized on GPIO %s", self._motion_gpio_pin)
-            except Exception as error:  # noqa: BLE001
-                logger.warning("Failed to initialize PIR motion sensor: %s", error)
-                self._motion_sensor = None
+        # MOTION DETECTION LOGIC (start)
+        # if self._motion_gpio_pin is not None:
+        #     try:
+        #         from gpiozero import MotionSensor  # type: ignore
+        #         self._motion_sensor = MotionSensor(self._motion_gpio_pin)
+        #         # gpiozero invokes these from a background thread; we only
+        #         # mutate plain Python attributes so no asyncio handoff needed.
+        #         self._motion_sensor.when_motion = self._on_motion_detected
+        #         self._motion_sensor.when_no_motion = self._on_motion_cleared
+        #         # Seed initial state in case the sensor is already triggered.
+        #         self._state.motion_detected = bool(self._motion_sensor.motion_detected)
+        #         logger.info("PIR motion sensor initialized on GPIO %s", self._motion_gpio_pin)
+        #     except Exception as error:  # noqa: BLE001
+        #         logger.warning("Failed to initialize PIR motion sensor: %s", error)
+        #         self._motion_sensor = None
+        # MOTION DETECTION LOGIC (end)
 
-    def _on_motion_detected(self) -> None:
-        self._state.motion_detected = True
-        self._state.last_motion_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        logger.info("Motion detected on GPIO %s", self._motion_gpio_pin)
-
-    def _on_motion_cleared(self) -> None:
-        self._state.motion_detected = False
+    # MOTION DETECTION LOGIC (start)
+    # def _on_motion_detected(self) -> None:
+    #     self._state.motion_detected = True
+    #     self._state.last_motion_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    #     logger.info("Motion detected on GPIO %s", self._motion_gpio_pin)
+    #
+    # def _on_motion_cleared(self) -> None:
+    #     self._state.motion_detected = False
+    # MOTION DETECTION LOGIC (end)
 
     async def shutdown(self) -> None:
         await self._video_publisher.stop()
@@ -145,14 +159,16 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 self._ir_device.close()
             self._ir_device = None
 
-        if self._motion_sensor is not None:
-            with contextlib.suppress(Exception):
-                self._motion_sensor.when_motion = None
-            with contextlib.suppress(Exception):
-                self._motion_sensor.when_no_motion = None
-            with contextlib.suppress(Exception):
-                self._motion_sensor.close()
-            self._motion_sensor = None
+        # MOTION DETECTION LOGIC (start)
+        # if self._motion_sensor is not None:
+        #     with contextlib.suppress(Exception):
+        #         self._motion_sensor.when_motion = None
+        #     with contextlib.suppress(Exception):
+        #         self._motion_sensor.when_no_motion = None
+        #     with contextlib.suppress(Exception):
+        #         self._motion_sensor.close()
+        #     self._motion_sensor = None
+        # MOTION DETECTION LOGIC (end)
 
     async def get_state(self) -> CameraState:
         measured_fps, last_frame_age_ms = self._video_publisher.get_stats()
@@ -164,8 +180,10 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             pan=self._state.pan,
             tilt=self._state.tilt,
             temperature_c=self._state.temperature_c,
-            motion_detected=self._state.motion_detected,
-            last_motion_at=self._state.last_motion_at,
+            # MOTION DETECTION LOGIC (start) — paused; carry False/None literals
+            motion_detected=False,
+            last_motion_at=None,
+            # MOTION DETECTION LOGIC (end)
             recording=self._state.recording,
             measured_fps=measured_fps,
             last_frame_age_ms=last_frame_age_ms,

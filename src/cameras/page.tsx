@@ -66,8 +66,10 @@ interface CameraState {
   tilt: number;
   temperatureC: number | null;
   recording: boolean;
+  // MOTION DETECTION LOGIC (start)
   motionDetected: boolean;
   lastMotionAt: string | null;
+  // MOTION DETECTION LOGIC (end)
   measuredFps: number | null;
   lastFrameAgeMs: number | null;
   zoomLevel: number | null;
@@ -102,18 +104,20 @@ type CommandAction =
 
 type PtzAction = 'panLeft' | 'panRight' | 'tiltUp' | 'tiltDown';
 
-const formatRelativeAgo = (iso: string | null, now: number): string => {
-  if (!iso) return '—';
-  const ms = now - Date.parse(iso);
-  if (!Number.isFinite(ms) || ms < 0) return '—';
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${String(seconds)}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${String(minutes)}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${String(hours)}h`;
-  return `${String(Math.floor(hours / 24))}d`;
-};
+// MOTION DETECTION LOGIC (start) — only consumer was motionLabel; verified via grep
+// const formatRelativeAgo = (iso: string | null, now: number): string => {
+//   if (!iso) return '—';
+//   const ms = now - Date.parse(iso);
+//   if (!Number.isFinite(ms) || ms < 0) return '—';
+//   const seconds = Math.floor(ms / 1000);
+//   if (seconds < 60) return `${String(seconds)}s`;
+//   const minutes = Math.floor(seconds / 60);
+//   if (minutes < 60) return `${String(minutes)}m`;
+//   const hours = Math.floor(minutes / 60);
+//   if (hours < 24) return `${String(hours)}h`;
+//   return `${String(Math.floor(hours / 24))}d`;
+// };
+// MOTION DETECTION LOGIC (end)
 
 const formatTimeUntil = (iso: string | null, now: number): string => {
   if (!iso) return '—';
@@ -398,8 +402,10 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
             ...(serverOutput.patch.pan === undefined ? {} : { pan: serverOutput.patch.pan }),
             ...(serverOutput.patch.tilt === undefined ? {} : { tilt: serverOutput.patch.tilt }),
             ...(serverOutput.patch.temperatureC === undefined ? {} : { temperatureC: serverOutput.patch.temperatureC }),
-            ...(serverOutput.patch.motionDetected === undefined ? {} : { motionDetected: serverOutput.patch.motionDetected }),
-            ...(serverOutput.patch.lastMotionAt === undefined ? {} : { lastMotionAt: serverOutput.patch.lastMotionAt }),
+            // MOTION DETECTION LOGIC (start)
+            // ...(serverOutput.patch.motionDetected === undefined ? {} : { motionDetected: serverOutput.patch.motionDetected }),
+            // ...(serverOutput.patch.lastMotionAt === undefined ? {} : { lastMotionAt: serverOutput.patch.lastMotionAt }),
+            // MOTION DETECTION LOGIC (end)
             ...(serverOutput.patch.recording === undefined ? {} : { recording: serverOutput.patch.recording }),
             ...(serverOutput.patch.measuredFps === undefined ? {} : { measuredFps: serverOutput.patch.measuredFps }),
             ...(serverOutput.patch.lastFrameAgeMs === undefined ? {} : { lastFrameAgeMs: serverOutput.patch.lastFrameAgeMs }),
@@ -909,15 +915,18 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const zoomPercent = ((previewZoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100;
   const zoomLabel = `${previewZoom.toFixed(1)}×`;
 
-  const motionLabel = useMemo(() => {
-    if (!(caps?.hasMotion ?? false)) return translate({ key: 'aperture.monitor.motionDisabled' });
-    if (cameraState?.motionDetected) return translate({ key: 'aperture.monitor.motionActive' });
-    if (cameraState?.lastMotionAt) {
-      return translate({ key: 'aperture.monitor.motionLastSeen' })
-        .replace('{{ago}}', formatRelativeAgo(cameraState.lastMotionAt, now));
-    }
-    return translate({ key: 'aperture.monitor.motionNeverSeen' });
-  }, [caps?.hasMotion, cameraState?.motionDetected, cameraState?.lastMotionAt, now, translate]);
+  // MOTION DETECTION LOGIC (locale keys live in en/nl/de/fr.json: aperture.monitor.motion, motionActive, motionLastSeen, motionNeverSeen, motionDisabled, aperture.recordings.filterMotion, aperture.dashboard.motion — left as harmless dead strings while paused)
+  // MOTION DETECTION LOGIC (start)
+  // const motionLabel = useMemo(() => {
+  //   if (!(caps?.hasMotion ?? false)) return translate({ key: 'aperture.monitor.motionDisabled' });
+  //   if (cameraState?.motionDetected) return translate({ key: 'aperture.monitor.motionActive' });
+  //   if (cameraState?.lastMotionAt) {
+  //     return translate({ key: 'aperture.monitor.motionLastSeen' })
+  //       .replace('{{ago}}', formatRelativeAgo(cameraState.lastMotionAt, now));
+  //   }
+  //   return translate({ key: 'aperture.monitor.motionNeverSeen' });
+  // }, [caps?.hasMotion, cameraState?.motionDetected, cameraState?.lastMotionAt, now, translate]);
+  // MOTION DETECTION LOGIC (end)
   const zoomInDisabled = zoomDisabled || previewZoom >= ZOOM_MAX;
   const zoomOutDisabled = zoomDisabled || previewZoom <= ZOOM_MIN;
   const handleZoomIn = useCallback(() => {
@@ -1217,12 +1226,14 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   </div>
                 )}
 
-                {cameraState?.motionDetected && (caps?.hasMotion ?? false) && (
+                {/* MOTION DETECTION LOGIC (start) */}
+                {/* {cameraState?.motionDetected && (caps?.hasMotion ?? false) && (
                   <div className={`absolute z-30 inline-flex items-center gap-1.5 rounded-lg bg-correct/85 px-2.5 py-1 backdrop-blur ${recordingActive ? 'right-3.5 top-12' : 'right-3.5 top-3.5'}`}>
                     <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
                     <span className="font-mono text-[11px] font-bold text-white">{translate({ key: 'aperture.monitor.motionActive' })}</span>
                   </div>
-                )}
+                )} */}
+                {/* MOTION DETECTION LOGIC (end) */}
 
                 <div className="absolute bottom-4 left-4 z-30">
                   <div className="relative h-[140px] w-[140px] rounded-full border border-white/15 bg-black/45 backdrop-blur">
@@ -1299,7 +1310,9 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   {[
                     { k: translate({ key: 'aperture.monitor.panTilt' }), v: cameraState ? `${String(cameraState.pan)}° / ${String(cameraState.tilt)}°` : '—' },
                     { k: translate({ key: 'aperture.monitor.zoom' }), v: zoomLabel },
-                    { k: translate({ key: 'aperture.monitor.motion' }), v: motionLabel },
+                    // MOTION DETECTION LOGIC (start)
+                    // { k: translate({ key: 'aperture.monitor.motion' }), v: motionLabel },
+                    // MOTION DETECTION LOGIC (end)
                     { k: translate({ key: 'aperture.monitor.frameAge' }), v: cameraState?.lastFrameAgeMs !== null && cameraState?.lastFrameAgeMs !== undefined ? `${String(cameraState.lastFrameAgeMs)} ms` : '—' },
                     { k: translate({ key: 'aperture.monitor.lastCommand' }), v: lastCommandResult ? `${lastCommandResult.action} · ${lastCommandResult.result}` : '—' },
                   ].map((row, index, list) => (

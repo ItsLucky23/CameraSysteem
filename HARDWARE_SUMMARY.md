@@ -44,7 +44,7 @@ Use this table for every jumper. **Physical pin** = the position on the 40-pin h
 | 2 | 5 V Out | Out | Red (+) rail of breadboard (5 V side) |
 | 6 | GND | — | Blue (–) rail of breadboard |
 | 12 | GPIO 18 | Out | MOSFET pin 1 (Gate) |
-| 26 | GPIO 7 | In | HC-SR501 OUT |
+| 26 | GPIO 7 | In | HC-SR501 OUT (motion path ON HOLD — see §4.A) |
 | 32 | GPIO 12 | Out (PWM) | MG90S Servo 1 (Pan), orange wire |
 | 33 | GPIO 13 | Out (PWM) | MG90S Servo 2 (Tilt), orange wire |
 
@@ -52,13 +52,15 @@ Use this table for every jumper. **Physical pin** = the position on the 40-pin h
 
 ## 4. Component wiring
 
-### A. HC-SR501 PIR motion sensor
+<!-- MOTION DETECTION LOGIC (start) -->
+### A. HC-SR501 PIR motion sensor (ON HOLD — code path paused, hardware still wired)
 
 | HC-SR501 pin | Wire | To |
 |--------------|------|----|
 | VCC | Red | 5 V red rail |
 | GND | Black | Blue GND rail |
 | OUT | Yellow / white | Pi physical pin 26 (GPIO 7) |
+<!-- MOTION DETECTION LOGIC (end) -->
 
 ### B. MG90S pan/tilt servos
 
@@ -114,3 +116,7 @@ python3 -c "import lgpio; print('lgpio OK')"
 ```
 
 If `lgpio` is missing, `journalctl -u camera_node` will show `PinFactoryFallback: Falling back from lgpio: No module named 'lgpio'` and motion edges will never fire even though the boot probe says `motion detection OK`.
+
+### IR boot self-test
+
+The camera node has an optional hands-free IR wiring check. Set `IR_BOOT_SELF_TEST=true` in the Pi Zero `.env` (alongside `IR_GPIO_PIN`) and restart the service — the IR LED will blink twice right after adapter startup so you can confirm the MOSFET + 12 V ring chain without opening the cameras page. Disable the flag again once the wiring is verified; it is not meant to run on every boot in normal operation.

@@ -17,8 +17,10 @@ export interface SyncParams {
       pan?: number;
       tilt?: number;
       temperatureC?: number | null;
-      motionDetected?: boolean;
-      lastMotionAt?: string | null;
+      // MOTION DETECTION LOGIC (start)
+      // motionDetected?: boolean;
+      // lastMotionAt?: string | null;
+      // MOTION DETECTION LOGIC (end)
       recording?: boolean;
       measuredFps?: number | null;
       lastFrameAgeMs?: number | null;
@@ -36,7 +38,9 @@ export interface SyncParams {
         hasPanTilt: boolean;
         hasMicrophone: boolean;
         hasSpeaker: boolean;
-        hasMotion: boolean;
+        // MOTION DETECTION LOGIC (start)
+        // hasMotion: boolean;
+        // MOTION DETECTION LOGIC (end)
         hasZoom: boolean;
         hasTemperature: boolean;
       } | null;

@@ -27,7 +27,9 @@ class MockHardwareAdapter(HardwareAdapter):
             pan=0,
             tilt=0,
             temperature_c=None,
+            # MOTION DETECTION LOGIC (start) — paused; left as False literal
             motion_detected=False,
+            # MOTION DETECTION LOGIC (end)
             recording=False,
             zoom_level=50,
         )
@@ -49,7 +51,9 @@ class MockHardwareAdapter(HardwareAdapter):
             pan=self._state.pan,
             tilt=self._state.tilt,
             temperature_c=self._state.temperature_c,
-            motion_detected=self._state.motion_detected,
+            # MOTION DETECTION LOGIC (start) — paused; left as False literal
+            motion_detected=False,
+            # MOTION DETECTION LOGIC (end)
             recording=self._state.recording,
             zoom_level=self._state.zoom_level,
         )

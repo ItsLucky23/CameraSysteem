@@ -67,9 +67,12 @@ class NodeSettings:
     ptz_step: int
     cpu_temp_path: str
     ir_gpio_pin: int | None
+    ir_boot_self_test: bool
     pan_servo_gpio_pin: int | None
     tilt_servo_gpio_pin: int | None
-    motion_gpio_pin: int | None
+    # MOTION DETECTION LOGIC (start)
+    # motion_gpio_pin: int | None
+    # MOTION DETECTION LOGIC (end)
     recording_start_command: str | None
     recording_stop_command: str | None
 
@@ -126,9 +129,12 @@ def load_settings() -> NodeSettings:
         ptz_step=max(1, _parse_int(os.getenv("PTZ_STEP"), 5)),
         cpu_temp_path=os.getenv("CPU_TEMP_PATH", "/sys/class/thermal/thermal_zone0/temp").strip(),
         ir_gpio_pin=_parse_optional_int(os.getenv("IR_GPIO_PIN")),
+        ir_boot_self_test=_parse_bool(os.getenv("IR_BOOT_SELF_TEST"), False),
         pan_servo_gpio_pin=_parse_optional_int(os.getenv("PAN_SERVO_GPIO_PIN")),
         tilt_servo_gpio_pin=_parse_optional_int(os.getenv("TILT_SERVO_GPIO_PIN")),
-        motion_gpio_pin=_parse_optional_int(os.getenv("MOTION_GPIO_PIN")),
+        # MOTION DETECTION LOGIC (start)
+        # motion_gpio_pin=_parse_optional_int(os.getenv("MOTION_GPIO_PIN")),
+        # MOTION DETECTION LOGIC (end)
         recording_start_command=(os.getenv("RECORDING_START_COMMAND") or "").strip() or None,
         recording_stop_command=(os.getenv("RECORDING_STOP_COMMAND") or "").strip() or None,
     )

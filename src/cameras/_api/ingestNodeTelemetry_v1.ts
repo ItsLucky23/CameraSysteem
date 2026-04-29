@@ -33,8 +33,10 @@ export interface ApiParams {
     pan?: number;
     tilt?: number;
     temperatureC?: number | null;
-    motionDetected?: boolean;
-    lastMotionAt?: string | null;
+    // MOTION DETECTION LOGIC (start)
+    // motionDetected?: boolean;
+    // lastMotionAt?: string | null;
+    // MOTION DETECTION LOGIC (end)
     recording?: boolean;
     measuredFps?: number | null;
     lastFrameAgeMs?: number | null;
@@ -45,7 +47,9 @@ export interface ApiParams {
       hasPanTilt: boolean;
       hasMicrophone: boolean;
       hasSpeaker: boolean;
-      hasMotion: boolean;
+      // MOTION DETECTION LOGIC (start)
+      // hasMotion: boolean;
+      // MOTION DETECTION LOGIC (end)
       hasZoom: boolean;
       hasTemperature: boolean;
     };
@@ -81,7 +85,9 @@ const isCapabilities = (value: unknown): value is Capabilities => {
     && typeof v.hasPanTilt === 'boolean'
     && typeof v.hasMicrophone === 'boolean'
     && typeof v.hasSpeaker === 'boolean'
-    && typeof v.hasMotion === 'boolean'
+    // MOTION DETECTION LOGIC (start)
+    // && typeof v.hasMotion === 'boolean'
+    // MOTION DETECTION LOGIC (end)
     && typeof v.hasZoom === 'boolean'
     && typeof v.hasTemperature === 'boolean'
   );
@@ -95,8 +101,10 @@ interface CameraStatePatch {
   tilt?: number;
   temperatureC?: number | null;
   recording?: boolean;
-  motionDetected?: boolean;
-  lastMotionAt?: string | null;
+  // MOTION DETECTION LOGIC (start)
+  // motionDetected?: boolean;
+  // lastMotionAt?: string | null;
+  // MOTION DETECTION LOGIC (end)
   measuredFps?: number | null;
   lastFrameAgeMs?: number | null;
   zoomLevel?: number | null;
@@ -133,12 +141,14 @@ const buildCameraPatch = ({
   if (data.temperatureC !== undefined) {
     patch.temperatureC = data.temperatureC;
   }
-  if (data.motionDetected !== undefined) {
-    patch.motionDetected = data.motionDetected;
-  }
-  if (data.lastMotionAt !== undefined) {
-    patch.lastMotionAt = data.lastMotionAt;
-  }
+  // MOTION DETECTION LOGIC (start)
+  // if (data.motionDetected !== undefined) {
+  //   patch.motionDetected = data.motionDetected;
+  // }
+  // if (data.lastMotionAt !== undefined) {
+  //   patch.lastMotionAt = data.lastMotionAt;
+  // }
+  // MOTION DETECTION LOGIC (end)
   if (data.recording !== undefined) {
     patch.recording = data.recording;
   }
@@ -199,13 +209,15 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
-  if (data.motionDetected !== undefined && typeof data.motionDetected !== 'boolean') {
-    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
-  }
-
-  if (data.lastMotionAt !== undefined && data.lastMotionAt !== null && typeof data.lastMotionAt !== 'string') {
-    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
-  }
+  // MOTION DETECTION LOGIC (start)
+  // if (data.motionDetected !== undefined && typeof data.motionDetected !== 'boolean') {
+  //   return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  // }
+  //
+  // if (data.lastMotionAt !== undefined && data.lastMotionAt !== null && typeof data.lastMotionAt !== 'string') {
+  //   return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  // }
+  // MOTION DETECTION LOGIC (end)
 
   if (data.recording !== undefined && typeof data.recording !== 'boolean') {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
@@ -284,7 +296,9 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
     if (!capabilitiesEqual(storedCapabilities, incoming)) {
       console.log('');
       console.log(
-        `[capabilities] cameraId=${cameraId} hasCamera=${String(incoming.hasCamera)} hasIR=${String(incoming.hasIR)} hasPanTilt=${String(incoming.hasPanTilt)} hasMicrophone=${String(incoming.hasMicrophone)} hasSpeaker=${String(incoming.hasSpeaker)} hasMotion=${String(incoming.hasMotion)} hasZoom=${String(incoming.hasZoom)} hasTemperature=${String(incoming.hasTemperature)}`,
+        // MOTION DETECTION LOGIC (start) — `hasMotion=${String(incoming.hasMotion)}` removed from log fragment
+        `[capabilities] cameraId=${cameraId} hasCamera=${String(incoming.hasCamera)} hasIR=${String(incoming.hasIR)} hasPanTilt=${String(incoming.hasPanTilt)} hasMicrophone=${String(incoming.hasMicrophone)} hasSpeaker=${String(incoming.hasSpeaker)} hasZoom=${String(incoming.hasZoom)} hasTemperature=${String(incoming.hasTemperature)}`,
+        // MOTION DETECTION LOGIC (end)
       );
     }
     setCapabilities(cameraId, incoming);
@@ -353,7 +367,9 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
         pan: updatedCamera.pan,
         tilt: updatedCamera.tilt,
         temperatureC: updatedCamera.temperatureC,
-        motionDetected: data.motionDetected ?? false,
+        // MOTION DETECTION LOGIC (start) — Prisma requires this column; hardcoded to false while paused
+        motionDetected: false,
+        // MOTION DETECTION LOGIC (end)
         recording: typeof data.recording === 'boolean' ? data.recording : updatedCamera.mode === 'record',
       },
     });
