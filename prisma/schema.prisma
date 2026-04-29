@@ -236,8 +236,11 @@ enum CAMERA_ACTION {
   tiltDown
   irOn
   irOff
+  irAuto
+  irSetStrength
   recordStart
   recordStop
+  setLogFlags
 }
 
 enum COMMAND_STATUS {

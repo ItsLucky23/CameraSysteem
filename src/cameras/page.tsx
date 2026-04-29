@@ -30,7 +30,9 @@ interface Capabilities {
   hasPanTilt: boolean;
   hasMicrophone: boolean;
   hasSpeaker: boolean;
-  hasMotion: boolean;
+  // MOTION DETECTION LOGIC (paused) — capability omitted server-side so the
+  // type is optional here to keep API response shapes assignable.
+  hasMotion?: boolean;
   hasZoom: boolean;
   hasTemperature: boolean;
 }
@@ -617,21 +619,23 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     if (irStrengthCommitTimeoutRef.current) {
       clearTimeout(irStrengthCommitTimeoutRef.current);
     }
-    irStrengthCommitTimeoutRef.current = setTimeout(async () => {
+    irStrengthCommitTimeoutRef.current = setTimeout(() => {
       irStrengthCommitTimeoutRef.current = null;
-      const response = await apiRequest({
-        name: 'cameras/setIRStrength',
-        version: 'v1',
-        data: { cameraId: selectedCameraId, strength },
-      });
-      if (response.status === 'error') {
+      void (async () => {
+        const response = await apiRequest({
+          name: 'cameras/setIRStrength',
+          version: 'v1',
+          data: { cameraId: selectedCameraId, strength },
+        });
+        if (response.status === 'error') {
+          setIrStrengthDraft(null);
+          notify.error({ key: response.errorCode });
+          return;
+        }
+        // Sync event will refresh cameraState shortly; clear the draft so any
+        // external change (another operator, auto-mode commit) wins.
         setIrStrengthDraft(null);
-        notify.error({ key: response.errorCode });
-        return;
-      }
-      // Sync event will refresh cameraState shortly; clear the draft so any
-      // external change (another operator, auto-mode commit) wins.
-      setIrStrengthDraft(null);
+      })();
     }, 250);
   }, [selectedCameraId]);
 
@@ -1478,13 +1482,17 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                           }}
                           onPointerUp={(event) => {
                             const next = Number((event.target as HTMLInputElement).value);
-                            if (Number.isFinite(next)) void setIRStrength(next);
+                            if (Number.isFinite(next)) {
+                              setIRStrength(next);
+                            }
                           }}
                           onKeyUp={(event) => {
                             // Keyboard adjustment (arrow keys) won't fire pointerup;
                             // commit on key release for keyboard parity.
                             const next = Number((event.target as HTMLInputElement).value);
-                            if (Number.isFinite(next)) void setIRStrength(next);
+                            if (Number.isFinite(next)) {
+                              setIRStrength(next);
+                            }
                           }}
                           className="h-1.5 w-full cursor-pointer accent-correct disabled:cursor-not-allowed disabled:opacity-50"
                         />
@@ -1526,8 +1534,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                 </section>
 
                 {session?.admin && selectedCameraId && (() => {
-                  const activeFlags = new Set(logFlagsByCamera[selectedCameraId] ?? []);
-                  const features: Array<{ key: 'ir' | 'recording' | 'performance' | 'streamPipeline' | 'commandQueue'; label: string }> = [
+                  const activeFlags = new Set(logFlagsByCamera[selectedCameraId]);
+                  const features: { key: 'ir' | 'recording' | 'performance' | 'streamPipeline' | 'commandQueue'; label: string }[] = [
                     { key: 'ir', label: translate({ key: 'aperture.monitor.debugFeatureIr' }) },
                     { key: 'recording', label: translate({ key: 'aperture.monitor.debugFeatureRecording' }) },
                     { key: 'performance', label: translate({ key: 'aperture.monitor.debugFeaturePerformance' }) },

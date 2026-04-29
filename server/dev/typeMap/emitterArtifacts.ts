@@ -130,7 +130,10 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 		.sort();
 
 	if (unknown.length > 0) {
-		throw new Error(`[TypeMapGenerator] Generated type map has unresolved type identifiers: ${unknown.join(', ')}`);
+		// Print raw values so empty/whitespace identifiers don't disappear in the
+		// thrown message. Helps when the generator produces a malformed reference.
+		console.error('[TypeMapGenerator] unresolved identifiers raw:', JSON.stringify(unknown));
+		throw new Error(`[TypeMapGenerator] Generated type map has unresolved type identifiers: ${unknown.map((name) => `"${name}"`).join(', ')}`);
 	}
 };
 

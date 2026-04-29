@@ -85,12 +85,14 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   // resets via null). 'auto' lets the controller pick the level so we leave
   // the persisted value alone. Default to 100 when the existing row has null
   // (legacy data before this field existed).
-  const persistStrength: number =
-    irModeValue === 'on' && isValidStrength(irStrengthRaw)
-      ? irStrengthRaw
-      : irStrengthRaw === null
-        ? 100
-        : (camera.irStrength ?? 100);
+  let persistStrength: number;
+  if (irModeValue === 'on' && isValidStrength(irStrengthRaw)) {
+    persistStrength = irStrengthRaw;
+  } else if (irStrengthRaw === null) {
+    persistStrength = 100;
+  } else {
+    persistStrength = camera.irStrength ?? 100;
+  }
 
   const [cameraUpdateError, updatedCamera] = await tryCatch(async () => {
     return functions.db.prisma.camera.update({

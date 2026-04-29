@@ -91,7 +91,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     serverOutput: {
       status: 'success',
       cameraId,
-      features: getLogFlagsForCamera(cameraId),
+      features: getLogFlagsForCamera(cameraId) as string[],
       at: new Date().toISOString(),
     },
   });
@@ -99,6 +99,6 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   return {
     status: 'success',
     cameraId,
-    features: getLogFlagsForCamera(cameraId),
+    features: getLogFlagsForCamera(cameraId) as string[],
   };
 };

@@ -54,7 +54,7 @@ export interface CameraNodeCommand {
   cameraId: string;
   cameraIp: string;
   action: string;
-  payload: Record<string, string | number | boolean | null>;
+  payload: Record<string, unknown>;
   requestedByUserId: string;
   requestedAt: string;
 }
@@ -80,7 +80,9 @@ export const enqueueCommand = async ({
   cameraId: string;
   commandId: string;
   action: string;
-  payload?: Record<string, string | number | boolean | null>;
+  // unknown so callers can pass arrays / nested objects (e.g., setLogFlags
+  // payload is { features: string[] }). The wire format is JSON regardless.
+  payload?: Record<string, unknown>;
   requestedByUserId: string;
   // When set, drop any queued items with this action before pushing the new
   // one. Used by irSetStrength so a flurry of slider drags collapses to the
