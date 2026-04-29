@@ -125,13 +125,31 @@ const getPi5LanIp = (): string | null => {
   return value && value.length > 0 ? value : null;
 };
 
+// Default resolution applied when the DB row has no resolutionWidth/Height yet
+// (legacy doc, or a freshly-created camera that was never edited in admin).
+// Mirrors the Pi Zero VideoPublisher's own FRAME_WIDTH/FRAME_HEIGHT fallback.
+const DEFAULT_WIDTH = 1920;
+const DEFAULT_HEIGHT = 1080;
+
 const fetchCameraStreamConfig = async (
   cameraId: string,
-): Promise<{ targetFps: number; bitrateBps: number; quality: string } | null> => {
+): Promise<{
+  targetFps: number;
+  bitrateBps: number;
+  quality: string;
+  width: number;
+  height: number;
+} | null> => {
   const [fetchError, camera] = await tryCatch(async () => {
     return prisma.camera.findUnique({
       where: { id: cameraId },
-      select: { targetFps: true, quality: true },
+      select: {
+        targetFps: true,
+        quality: true,
+        resolutionWidth: true,
+        resolutionHeight: true,
+        bitrateBps: true,
+      },
     });
   });
 
@@ -146,25 +164,35 @@ const fetchCameraStreamConfig = async (
   //? Now we warn loudly so the operator knows the doc needs to be updated.
   const hasTargetFps = typeof camera.targetFps === 'number';
   const hasQuality = typeof camera.quality === 'string' && camera.quality.length > 0;
+  const hasResolution =
+    typeof camera.resolutionWidth === 'number' && typeof camera.resolutionHeight === 'number';
+  const hasBitrate = typeof camera.bitrateBps === 'number';
+
   const targetFps = hasTargetFps ? (camera.targetFps as number) : 15;
   const quality = hasQuality ? (camera.quality as string) : 'medium';
+  const width = hasResolution ? (camera.resolutionWidth as number) : DEFAULT_WIDTH;
+  const height = hasResolution ? (camera.resolutionHeight as number) : DEFAULT_HEIGHT;
+  const bitrateBps = hasBitrate ? (camera.bitrateBps as number) : resolveBitrateBps(quality);
 
-  if (!hasTargetFps || !hasQuality) {
+  if (!hasTargetFps || !hasQuality || !hasResolution || !hasBitrate) {
     console.warn(
       `[cam ${cameraId}] DB stream config missing fields — using fallback. ` +
-      `hasTargetFps=${String(hasTargetFps)} hasQuality=${String(hasQuality)}. ` +
-      `Open admin and re-save this camera so the document gets the targetFps + quality fields persisted.`,
+      `hasTargetFps=${String(hasTargetFps)} hasQuality=${String(hasQuality)} ` +
+      `hasResolution=${String(hasResolution)} hasBitrate=${String(hasBitrate)}. ` +
+      `Open admin and re-save this camera so the document gets the new fields persisted.`,
     );
   }
 
   console.log(
-    `[cam ${cameraId}] DB stream config -> targetFps=${String(targetFps)} quality=${quality} bitrateBps=${String(resolveBitrateBps(quality))}`,
+    `[cam ${cameraId}] DB stream config -> targetFps=${String(targetFps)} quality=${quality} bitrateBps=${String(bitrateBps)} width=${String(width)} height=${String(height)}`,
   );
 
   return {
     targetFps,
     quality,
-    bitrateBps: resolveBitrateBps(quality),
+    bitrateBps,
+    width,
+    height,
   };
 };
 
@@ -231,6 +259,8 @@ const activateCamera = async ({
     rtpPort: ingestResult.rtpPort,
     targetFps: streamConfig.targetFps,
     bitrateBps: streamConfig.bitrateBps,
+    width: streamConfig.width,
+    height: streamConfig.height,
   };
   console.log(
     `cameraStreamOrchestrator: enqueue startVideoStream for ${cameraId} payload=${JSON.stringify(startPayload)}`,
@@ -364,6 +394,8 @@ const kickPiZeroStream = async ({
         rtpPort,
         targetFps: streamConfig.targetFps,
         bitrateBps: streamConfig.bitrateBps,
+        width: streamConfig.width,
+        height: streamConfig.height,
       },
       requestedByUserId: SYSTEM_USER_ID,
     });

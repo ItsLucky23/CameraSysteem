@@ -19,6 +19,9 @@ export interface ApiParams {
     cameraIp: string;
     targetFps?: number;
     quality?: Quality;
+    resolutionWidth?: number | null;
+    resolutionHeight?: number | null;
+    bitrateBps?: number | null;
   };
   user: SessionLayout;
   functions: Functions;
@@ -27,6 +30,18 @@ export interface ApiParams {
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const qualityValues: Quality[] = ['low', 'medium', 'high'];
+
+const ALLOWED_RESOLUTIONS: Array<[number, number]> = [
+  [1920, 1080],
+  [1280, 720],
+  [854, 480],
+  [640, 480],
+];
+const isAllowedResolution = (width: number, height: number): boolean =>
+  ALLOWED_RESOLUTIONS.some(([w, h]) => w === width && h === height);
+
+const MIN_BITRATE_BPS = 500_000;
+const MAX_BITRATE_BPS = 12_000_000;
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const slug = data.slug.trim().toLowerCase();
@@ -56,6 +71,31 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   if (!qualityValues.includes(quality)) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  const resolutionWidthRaw = data.resolutionWidth ?? null;
+  const resolutionHeightRaw = data.resolutionHeight ?? null;
+  if ((resolutionWidthRaw === null) !== (resolutionHeightRaw === null)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+  if (resolutionWidthRaw !== null && resolutionHeightRaw !== null) {
+    if (!Number.isInteger(resolutionWidthRaw) || !Number.isInteger(resolutionHeightRaw)) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+    if (!isAllowedResolution(resolutionWidthRaw, resolutionHeightRaw)) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+  }
+
+  const bitrateBpsRaw = data.bitrateBps ?? null;
+  if (bitrateBpsRaw !== null) {
+    if (
+      !Number.isInteger(bitrateBpsRaw)
+      || bitrateBpsRaw < MIN_BITRATE_BPS
+      || bitrateBpsRaw > MAX_BITRATE_BPS
+    ) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
   }
 
   const [existingCameraError, existingCamera] = await tryCatch(async () => {
@@ -96,6 +136,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
         ip: cameraIp,
         targetFps,
         quality,
+        resolutionWidth: resolutionWidthRaw,
+        resolutionHeight: resolutionHeightRaw,
+        bitrateBps: bitrateBpsRaw,
       },
     });
   });
@@ -120,6 +163,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       mode: createdCamera.mode,
       targetFps: createdCamera.targetFps,
       quality: createdCamera.quality,
+      resolutionWidth: createdCamera.resolutionWidth ?? null,
+      resolutionHeight: createdCamera.resolutionHeight ?? null,
+      bitrateBps: createdCamera.bitrateBps ?? null,
       lastSeenAt: createdCamera.lastSeenAt ? createdCamera.lastSeenAt.toISOString() : null,
       createdAt: createdCamera.createdAt.toISOString(),
       updatedAt: createdCamera.updatedAt.toISOString(),

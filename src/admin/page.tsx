@@ -30,12 +30,46 @@ interface CameraCatalogItem {
   mode: 'off' | 'idle' | 'live' | 'record';
   targetFps: number;
   quality: Quality;
+  resolutionWidth: number | null;
+  resolutionHeight: number | null;
+  bitrateBps: number | null;
   lastSeenAt: string | null;
   createdAt: string;
   updatedAt: string;
   thumbnail: CatalogThumbnail | null;
   activeRecording: { recordingId: string; startedAt: string } | null;
 }
+
+// Allowed resolutions mirror the server-side validators in
+// updateCamera_v1.ts and createCamera_v1.ts. Keep these in sync.
+const RESOLUTION_CHOICES: Array<{ width: number; height: number; label: string }> = [
+  { width: 1920, height: 1080, label: '1920x1080' },
+  { width: 1280, height: 720, label: '1280x720' },
+  { width: 854, height: 480, label: '854x480' },
+  { width: 640, height: 480, label: '640x480' },
+];
+
+const DEFAULT_FORM_WIDTH = 1920;
+const DEFAULT_FORM_HEIGHT = 1080;
+const DEFAULT_FORM_BITRATE_MBPS = 4;
+
+// Presets bulk-set the five tunables at once. The user can still fine-tune
+// after picking a preset; the active highlight just shows which preset (if any)
+// the current form values exactly match.
+interface StreamPreset {
+  id: string;
+  width: number;
+  height: number;
+  fps: number;
+  mbps: number;
+  quality: Quality;
+}
+
+const STREAM_PRESETS: StreamPreset[] = [
+  { id: 'fpsOpt',     width: 1280, height: 720,  fps: 60, mbps: 4, quality: 'medium' },
+  { id: 'qualityOpt', width: 1920, height: 1080, fps: 25, mbps: 8, quality: 'high'   },
+  { id: 'bestOfBoth', width: 1280, height: 720,  fps: 50, mbps: 6, quality: 'medium' },
+];
 
 interface ThumbnailEntry {
   jpegBase64: string;
@@ -93,12 +127,18 @@ export default function AdminPage() {
     cameraIp: string;
     targetFps: number;
     quality: Quality;
+    resolutionWidth: number;
+    resolutionHeight: number;
+    bitrateMbps: number;
   }>({
     slug: '',
     name: '',
     cameraIp: '',
     targetFps: 15,
     quality: 'medium',
+    resolutionWidth: DEFAULT_FORM_WIDTH,
+    resolutionHeight: DEFAULT_FORM_HEIGHT,
+    bitrateMbps: DEFAULT_FORM_BITRATE_MBPS,
   });
 
   const onlineCount = useMemo(() => cameraCatalog.filter((c) => c.isOnline).length, [cameraCatalog]);
@@ -259,6 +299,9 @@ export default function AdminPage() {
       cameraIp: form.cameraIp.trim(),
       targetFps: form.targetFps,
       quality: form.quality,
+      resolutionWidth: form.resolutionWidth,
+      resolutionHeight: form.resolutionHeight,
+      bitrateBps: Math.round(form.bitrateMbps * 1_000_000),
     };
 
     if (!payload.slug || !payload.name || !payload.cameraIp) {
@@ -294,7 +337,16 @@ export default function AdminPage() {
     }
 
     setCameraCatalog((previous) => [parsedBody.camera, ...previous].toSorted((a, b) => a.name.localeCompare(b.name)));
-    setForm({ slug: '', name: '', cameraIp: '', targetFps: 15, quality: 'medium' });
+    setForm({
+      slug: '',
+      name: '',
+      cameraIp: '',
+      targetFps: 15,
+      quality: 'medium',
+      resolutionWidth: DEFAULT_FORM_WIDTH,
+      resolutionHeight: DEFAULT_FORM_HEIGHT,
+      bitrateMbps: DEFAULT_FORM_BITRATE_MBPS,
+    });
     setPanelOpen(false);
     setSavingCamera(false);
     notify.success({ key: 'adminCameraManager.created' });
@@ -309,6 +361,9 @@ export default function AdminPage() {
       cameraIp: form.cameraIp.trim(),
       targetFps: form.targetFps,
       quality: form.quality,
+      resolutionWidth: form.resolutionWidth,
+      resolutionHeight: form.resolutionHeight,
+      bitrateBps: Math.round(form.bitrateMbps * 1_000_000),
     };
 
     if (!payload.slug || !payload.name || !payload.cameraIp) {
@@ -390,19 +445,38 @@ export default function AdminPage() {
   const openCreatePanel = useCallback(() => {
     setPanelMode('create');
     setPanelCameraId(null);
-    setForm({ slug: '', name: '', cameraIp: '', targetFps: 15, quality: 'medium' });
+    setForm({
+      slug: '',
+      name: '',
+      cameraIp: '',
+      targetFps: 15,
+      quality: 'medium',
+      resolutionWidth: DEFAULT_FORM_WIDTH,
+      resolutionHeight: DEFAULT_FORM_HEIGHT,
+      bitrateMbps: DEFAULT_FORM_BITRATE_MBPS,
+    });
     setPanelOpen(true);
   }, []);
 
   const openEditPanel = useCallback((camera: CameraCatalogItem) => {
     setPanelMode('edit');
     setPanelCameraId(camera.id);
+    // Legacy DB rows can have null resolution/bitrate. Mirror the server
+    // fallbacks so the form opens with sensible values.
+    const initialWidth = camera.resolutionWidth ?? DEFAULT_FORM_WIDTH;
+    const initialHeight = camera.resolutionHeight ?? DEFAULT_FORM_HEIGHT;
+    const initialMbps = camera.bitrateBps !== null
+      ? Math.round((camera.bitrateBps / 1_000_000) * 10) / 10
+      : DEFAULT_FORM_BITRATE_MBPS;
     setForm({
       slug: camera.slug,
       name: camera.name,
       cameraIp: camera.cameraIp,
       targetFps: camera.targetFps,
       quality: camera.quality,
+      resolutionWidth: initialWidth,
+      resolutionHeight: initialHeight,
+      bitrateMbps: initialMbps,
     });
     setPanelOpen(true);
   }, []);
@@ -415,6 +489,36 @@ export default function AdminPage() {
 
   const qualityChoices: Quality[] = ['low', 'medium', 'high'];
   const qualityLabel = (q: Quality): string => translate({ key: `aperture.monitor.quality${q.charAt(0).toUpperCase()}${q.slice(1)}` });
+
+  // Match the form against the preset list. Equality on all five tunables;
+  // null when no preset matches (fine-tuned camera, or fresh defaults).
+  const activePresetId = useMemo<string | null>(() => {
+    const match = STREAM_PRESETS.find((preset) => (
+      preset.width === form.resolutionWidth
+      && preset.height === form.resolutionHeight
+      && preset.fps === form.targetFps
+      && preset.mbps === form.bitrateMbps
+      && preset.quality === form.quality
+    ));
+    return match ? match.id : null;
+  }, [form.resolutionWidth, form.resolutionHeight, form.targetFps, form.bitrateMbps, form.quality]);
+
+  const applyPreset = (preset: StreamPreset): void => {
+    setForm((p) => ({
+      ...p,
+      resolutionWidth: preset.width,
+      resolutionHeight: preset.height,
+      targetFps: preset.fps,
+      bitrateMbps: preset.mbps,
+      quality: preset.quality,
+    }));
+  };
+
+  const presetSubLabel = (preset: StreamPreset): string =>
+    `${String(preset.width)}x${String(preset.height)} - ${String(preset.fps)} fps - ${preset.mbps.toFixed(1)} Mbps`;
+
+  const presetMainLabel = (presetId: string): string =>
+    translate({ key: `aperture.admin.preset${presetId.charAt(0).toUpperCase()}${presetId.slice(1)}` });
 
   return (
     <main className="thin-scroll h-full w-full overflow-y-auto bg-background">
@@ -637,6 +741,45 @@ export default function AdminPage() {
                   />
                 </div>
 
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.presetsLabel' })}</label>
+                  <div className="flex gap-1 rounded-[10px] bg-container2 p-1">
+                    {STREAM_PRESETS.map((preset) => {
+                      const active = activePresetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => { applyPreset(preset); }}
+                          className={`flex-1 flex flex-col items-center gap-0.5 rounded-[7px] border px-2 py-1.5 ${active ? 'border-container1-border bg-container1 text-title' : 'border-transparent text-common'}`}
+                        >
+                          <span className="text-xs font-semibold">{presetMainLabel(preset.id)}</span>
+                          <span className="text-[10.5px] font-mono text-muted">{presetSubLabel(preset)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldResolution' })}</label>
+                  <div className="flex gap-1 rounded-[10px] bg-container2 p-1">
+                    {RESOLUTION_CHOICES.map((option) => {
+                      const active = form.resolutionWidth === option.width && form.resolutionHeight === option.height;
+                      return (
+                        <button
+                          key={option.label}
+                          type="button"
+                          onClick={() => { setForm((p) => ({ ...p, resolutionWidth: option.width, resolutionHeight: option.height })); }}
+                          className={`flex-1 rounded-[7px] border py-1.5 font-mono text-xs font-semibold ${active ? 'border-container1-border bg-container1 text-title' : 'border-transparent text-common'}`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldFps' })}</label>
@@ -672,6 +815,25 @@ export default function AdminPage() {
                       })}
                     </div>
                   </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldBitrateMbps' })}</label>
+                  <input
+                    type="number"
+                    min={0.5}
+                    max={12}
+                    step={0.1}
+                    className="h-[42px] rounded-[10px] border border-container1-border bg-container1 px-3.5 font-mono text-sm text-title outline-none transition-colors focus:border-primary"
+                    value={String(form.bitrateMbps)}
+                    onChange={(event) => {
+                      const parsed = Number.parseFloat(event.target.value);
+                      if (!Number.isFinite(parsed)) return;
+                      const clamped = Math.min(12, Math.max(0.5, parsed));
+                      // Round to one decimal so the input stays in sync with the preset matcher.
+                      setForm((p) => ({ ...p, bitrateMbps: Math.round(clamped * 10) / 10 }));
+                    }}
+                  />
                 </div>
               </div>
 

@@ -95,6 +95,9 @@ model Camera {
   tilt         Int       @default(0)
   targetFps    Int       @default(15)
   quality      QUALITY   @default(medium)
+  resolutionWidth  Int?
+  resolutionHeight Int?
+  bitrateBps   Int?
   temperatureC Float?
   lastSeenAt   DateTime?
   createdAt    DateTime  @default(now())

@@ -235,12 +235,16 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         rtp_port: int,
         target_fps: int,
         bitrate_bps: int,
+        width: int | None = None,
+        height: int | None = None,
     ) -> None:
         await self._video_publisher.start(
             rtp_host=rtp_host,
             rtp_port=rtp_port,
             target_fps=target_fps,
             bitrate_bps=bitrate_bps,
+            width=width,
+            height=height,
         )
 
     async def stop_video_stream(self) -> None:

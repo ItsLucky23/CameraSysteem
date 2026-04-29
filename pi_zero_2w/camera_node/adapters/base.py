@@ -42,8 +42,14 @@ class HardwareAdapter(ABC):
         rtp_port: int,
         target_fps: int,
         bitrate_bps: int,
+        width: int | None = None,
+        height: int | None = None,
     ) -> None:
-        """Start sending H.264 RTP to the Pi 5 ingest endpoint."""
+        """Start sending H.264 RTP to the Pi 5 ingest endpoint.
+
+        width/height default to the adapter's own fallback when None — used by
+        legacy command payloads that don't carry resolution.
+        """
 
     @abstractmethod
     async def stop_video_stream(self) -> None:

@@ -86,14 +86,18 @@ class MockHardwareAdapter(HardwareAdapter):
         rtp_port: int,
         target_fps: int,
         bitrate_bps: int,
+        width: int | None = None,
+        height: int | None = None,
     ) -> None:
         await asyncio.sleep(0)
         logger.info(
-            "MockHardwareAdapter: pretending to start RTP stream to %s:%s (fps=%s bitrate=%s bps)",
+            "MockHardwareAdapter: pretending to start RTP stream to %s:%s (fps=%s bitrate=%s bps width=%s height=%s)",
             rtp_host,
             rtp_port,
             target_fps,
             bitrate_bps,
+            width,
+            height,
         )
 
     async def stop_video_stream(self) -> None:

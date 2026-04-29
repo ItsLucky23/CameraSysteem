@@ -99,7 +99,7 @@ def _probe_servo(label: str, gpio_pin: int | None) -> ProbeResult:
     except Exception:
         pass
 
-    return ("OK", f"GPIO {gpio_pin}", True)
+    return ("OK", f"GPIO {gpio_pin} (pin claim ok — wiring not verified)", True)
 
 
 _CARD_LINE_RE = re.compile(r"^card\s+(\d+)\s*:\s*([^\[]+?)\s*\[([^\]]*)\]", re.MULTILINE | re.IGNORECASE)

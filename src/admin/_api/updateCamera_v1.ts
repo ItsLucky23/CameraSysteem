@@ -22,6 +22,9 @@ export interface ApiParams {
     cameraIp: string;
     targetFps?: number;
     quality?: Quality;
+    resolutionWidth?: number | null;
+    resolutionHeight?: number | null;
+    bitrateBps?: number | null;
   };
   user: SessionLayout;
   functions: Functions;
@@ -30,6 +33,20 @@ export interface ApiParams {
 const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ipv4Regex = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 const qualityValues: Quality[] = ['low', 'medium', 'high'];
+
+// The encoder is happiest at the standard rpicam-vid sensor modes; sticking to
+// a fixed set avoids odd ISP scaler crops at off-mode resolutions.
+const ALLOWED_RESOLUTIONS: Array<[number, number]> = [
+  [1920, 1080],
+  [1280, 720],
+  [854, 480],
+  [640, 480],
+];
+const isAllowedResolution = (width: number, height: number): boolean =>
+  ALLOWED_RESOLUTIONS.some(([w, h]) => w === width && h === height);
+
+const MIN_BITRATE_BPS = 500_000;
+const MAX_BITRATE_BPS = 12_000_000;
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const cameraId = data.cameraId.trim();
@@ -62,10 +79,44 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
+  // Resolution: both-or-neither. Null on either side means "use the orchestrator
+  // fallback" (1920x1080), so the legacy DB rows without these fields keep working.
+  const resolutionWidthRaw = data.resolutionWidth ?? null;
+  const resolutionHeightRaw = data.resolutionHeight ?? null;
+  if ((resolutionWidthRaw === null) !== (resolutionHeightRaw === null)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+  if (resolutionWidthRaw !== null && resolutionHeightRaw !== null) {
+    if (!Number.isInteger(resolutionWidthRaw) || !Number.isInteger(resolutionHeightRaw)) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+    if (!isAllowedResolution(resolutionWidthRaw, resolutionHeightRaw)) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+  }
+
+  const bitrateBpsRaw = data.bitrateBps ?? null;
+  if (bitrateBpsRaw !== null) {
+    if (
+      !Number.isInteger(bitrateBpsRaw)
+      || bitrateBpsRaw < MIN_BITRATE_BPS
+      || bitrateBpsRaw > MAX_BITRATE_BPS
+    ) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+  }
+
   const [cameraReadError, existingCamera] = await tryCatch(async () => {
     return functions.db.prisma.camera.findUnique({
       where: { id: cameraId },
-      select: { id: true, targetFps: true, quality: true },
+      select: {
+        id: true,
+        targetFps: true,
+        quality: true,
+        resolutionWidth: true,
+        resolutionHeight: true,
+        bitrateBps: true,
+      },
     });
   });
 
@@ -122,6 +173,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
         ip: cameraIp,
         targetFps,
         quality,
+        resolutionWidth: resolutionWidthRaw,
+        resolutionHeight: resolutionHeightRaw,
+        bitrateBps: bitrateBpsRaw,
       },
     });
   });
@@ -132,18 +186,22 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   console.log('');
   console.log(
-    `[action] admin/updateCamera cameraId=${cameraId} userId=${user.id} slug=${slug} ip=${cameraIp} targetFps=${String(targetFps)} quality=${quality}`,
+    `[action] admin/updateCamera cameraId=${cameraId} userId=${user.id} slug=${slug} ip=${cameraIp} targetFps=${String(targetFps)} quality=${quality} resolution=${String(resolutionWidthRaw)}x${String(resolutionHeightRaw)} bitrateBps=${String(bitrateBpsRaw)}`,
   );
 
   const streamConfigChanged =
-    existingCamera.targetFps !== targetFps || existingCamera.quality !== quality;
+    existingCamera.targetFps !== targetFps
+    || existingCamera.quality !== quality
+    || existingCamera.resolutionWidth !== resolutionWidthRaw
+    || existingCamera.resolutionHeight !== resolutionHeightRaw
+    || existingCamera.bitrateBps !== bitrateBpsRaw;
 
   if (streamConfigChanged) {
     void onCameraStreamConfigChanged({ cameraId, cameraIp });
 
-    // Broadcast the new target fps / quality so anyone already on the cameras
-    // page sees the labels update live. Pi Zero's real measuredFps follows
-    // ~5s later via the regular telemetry broadcast.
+    // Broadcast the new target fps / quality / resolution / bitrate so anyone
+    // already on the cameras page sees the labels update live. Pi Zero's real
+    // measuredFps follows ~5s later via the regular telemetry broadcast.
     emitCameraSyncEvent({
       fullName: 'sync/cameras/cameraStateUpdated/v1',
       receiver: getCameraRoomCode(cameraId),
@@ -153,6 +211,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
         patch: {
           targetFps,
           quality,
+          resolutionWidth: resolutionWidthRaw,
+          resolutionHeight: resolutionHeightRaw,
+          bitrateBps: bitrateBpsRaw,
         },
         at: new Date().toISOString(),
       },
@@ -170,6 +231,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       mode: updatedCamera.mode,
       targetFps: updatedCamera.targetFps,
       quality: updatedCamera.quality,
+      resolutionWidth: updatedCamera.resolutionWidth ?? null,
+      resolutionHeight: updatedCamera.resolutionHeight ?? null,
+      bitrateBps: updatedCamera.bitrateBps ?? null,
       lastSeenAt: updatedCamera.lastSeenAt ? updatedCamera.lastSeenAt.toISOString() : null,
       createdAt: updatedCamera.createdAt.toISOString(),
       updatedAt: updatedCamera.updatedAt.toISOString(),

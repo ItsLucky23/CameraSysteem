@@ -68,12 +68,14 @@ class CommandExecutor:
                         result="rejected",
                         reason_code="camera.invalidInput",
                     )
-                rtp_host, rtp_port, target_fps, bitrate_bps = validation
+                rtp_host, rtp_port, target_fps, bitrate_bps, width, height = validation
                 await self._adapter.start_video_stream(
                     rtp_host=rtp_host,
                     rtp_port=rtp_port,
                     target_fps=target_fps,
                     bitrate_bps=bitrate_bps,
+                    width=width,
+                    height=height,
                 )
             elif command.action == "stopVideoStream":
                 await self._adapter.stop_video_stream()
@@ -102,11 +104,13 @@ class CommandExecutor:
 
 def _validate_start_video_stream(
     payload: dict[str, Any],
-) -> tuple[str, int, int, int] | None:
+) -> tuple[str, int, int, int, int | None, int | None] | None:
     rtp_host_raw = payload.get("rtpHost")
     rtp_port_raw = payload.get("rtpPort")
     target_fps_raw = payload.get("targetFps")
     bitrate_bps_raw = payload.get("bitrateBps")
+    width_raw = payload.get("width")
+    height_raw = payload.get("height")
 
     if not isinstance(rtp_host_raw, str):
         return None
@@ -137,4 +141,23 @@ def _validate_start_video_stream(
     if bitrate_bps_raw < 100_000 or bitrate_bps_raw > 20_000_000:
         return None
 
-    return rtp_host, rtp_port_raw, target_fps_raw, bitrate_bps_raw
+    # Resolution: both-or-neither. When both are absent the publisher falls
+    # back to its default FRAME_WIDTH/FRAME_HEIGHT.
+    if (width_raw is None) != (height_raw is None):
+        return None
+
+    width: int | None = None
+    height: int | None = None
+    if width_raw is not None and height_raw is not None:
+        if isinstance(width_raw, bool) or isinstance(height_raw, bool):
+            return None
+        if not isinstance(width_raw, int) or not isinstance(height_raw, int):
+            return None
+        if width_raw < 320 or width_raw > 3840:
+            return None
+        if height_raw < 240 or height_raw > 2160:
+            return None
+        width = width_raw
+        height = height_raw
+
+    return rtp_host, rtp_port_raw, target_fps_raw, bitrate_bps_raw, width, height

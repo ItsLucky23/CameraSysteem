@@ -8,7 +8,10 @@ import time
 logger = logging.getLogger(__name__)
 
 
-# V1 is locked to 1080p; fps + bitrate come from Pi 5 per-camera config.
+# Default resolution used only when start() is called without explicit
+# width/height. The Pi 5 orchestrator now drives resolution per-camera via the
+# startVideoStream payload; these constants are the legacy fallback for nodes
+# whose command payloads don't yet carry width/height.
 FRAME_WIDTH = 1920
 FRAME_HEIGHT = 1080
 
@@ -28,6 +31,8 @@ class VideoPublisher:
         self._target_port: int | None = None
         self._target_fps: int | None = None
         self._target_bitrate_bps: int | None = None
+        self._target_width: int | None = None
+        self._target_height: int | None = None
         self._measured_fps: float | None = None
         self._last_frame_at: float | None = None
         self._last_frame_count: int = 0
@@ -43,45 +48,63 @@ class VideoPublisher:
         rtp_port: int,
         target_fps: int,
         bitrate_bps: int,
+        width: int | None = None,
+        height: int | None = None,
     ) -> None:
+        # Resolve nullable resolution to the module defaults so the rest of the
+        # pipeline (no-op guard + rpicam-vid args) deals in concrete numbers.
+        effective_width = width if width is not None else FRAME_WIDTH
+        effective_height = height if height is not None else FRAME_HEIGHT
+
         if self._process is not None and self._process.returncode is None:
             if (
                 self._target_host == rtp_host
                 and self._target_port == rtp_port
                 and self._target_fps == target_fps
                 and self._target_bitrate_bps == bitrate_bps
+                and self._target_width == effective_width
+                and self._target_height == effective_height
             ):
                 logger.info("VideoPublisher already streaming to %s:%s", rtp_host, rtp_port)
                 return
             logger.info(
-                "VideoPublisher restarting stream to %s:%s (fps=%s bitrate=%s)",
+                "VideoPublisher restarting stream to %s:%s (fps=%s bitrate=%s width=%s height=%s)",
                 rtp_host,
                 rtp_port,
                 target_fps,
                 bitrate_bps,
+                effective_width,
+                effective_height,
             )
             await self.stop()
-        else:
-            # If a previous Python run exited without cleanup, rpicam-vid / ffmpeg
-            # can still be holding the camera device as orphan processes (PPID=1).
-            # A fresh rpicam-vid then fails with "Camera is already in use" and the
-            # drain task exits with 0 progress lines. Sweep them before spawning.
-            await self._kill_orphan_pipelines()
+
+        # ALWAYS sweep before spawning a new pipeline. SIGTERM on the /bin/sh
+        # wrapper doesn't propagate to rpicam-vid / ffmpeg children, so even a
+        # successful self.stop() above can leave orphans (PPID=1) holding
+        # /dev/video0. Skipping this on the restart path was the root cause of
+        # the V4L2 buffer-queue failure + start/stop storm: the new rpicam-vid
+        # fails to claim the device, produces zero RTP, the Pi 5 reconciler
+        # kicks again, and we loop forever.
+        await self._kill_orphan_pipelines()
 
         cmd = self._build_pipeline_command(
             rtp_host=rtp_host,
             rtp_port=rtp_port,
             target_fps=target_fps,
             bitrate_bps=bitrate_bps,
+            width=effective_width,
+            height=effective_height,
         )
         # Single-line stamp so it's easy to compare against the Pi 5
         # "[cam X] DB stream config -> ..." log line and confirm what
         # actually reached the encoder.
         logger.info(
-            "Effective stream params: target_fps=%s (uncapped=%s) bitrate_bps=%s rtp=%s:%s",
+            "Effective stream params: target_fps=%s (uncapped=%s) bitrate_bps=%s width=%s height=%s rtp=%s:%s",
             target_fps,
             target_fps <= 0,
             bitrate_bps,
+            effective_width,
+            effective_height,
             rtp_host,
             rtp_port,
         )
@@ -96,6 +119,8 @@ class VideoPublisher:
         self._target_port = rtp_port
         self._target_fps = target_fps
         self._target_bitrate_bps = bitrate_bps
+        self._target_width = effective_width
+        self._target_height = effective_height
 
         # Drain stderr in the background so the pipe does not fill and deadlock the pipeline.
         asyncio.create_task(self._drain_stderr(self._process))
@@ -115,6 +140,8 @@ class VideoPublisher:
         self._target_port = None
         self._target_fps = None
         self._target_bitrate_bps = None
+        self._target_width = None
+        self._target_height = None
         self._measured_fps = None
         self._last_frame_at = None
         self._last_frame_count = 0
@@ -165,6 +192,7 @@ class VideoPublisher:
         # Scoped to the two binaries we spawn. `pkill -f` matches the full command
         # line. Never blocks startup on failure — this is best-effort self-heal.
         patterns = ("rpicam-vid", "ffmpeg.*rtp")
+        pkill_missing = False
         for pattern in patterns:
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -178,10 +206,19 @@ class VideoPublisher:
                 if return_code == 0:
                     logger.info("VideoPublisher killed orphan process matching '%s'", pattern)
             except FileNotFoundError:
-                return
+                # pkill not installed — bail out of the sweep entirely; no point
+                # trying the second pattern. Still drop into the settling sleep.
+                pkill_missing = True
+                break
             except Exception as error:  # noqa: BLE001
+                # Log and continue: a failure on rpicam-vid shouldn't skip the
+                # ffmpeg sweep, and either way we still need the settling sleep
+                # to let the kernel release /dev/video0.
                 logger.warning("VideoPublisher orphan sweep failed for '%s': %s", pattern, error)
-                return
+                continue
+
+        if pkill_missing:
+            logger.warning("VideoPublisher: pkill not on PATH — orphan sweep skipped")
 
         # Let the kernel release the camera device before the next rpicam-vid binds it.
         await asyncio.sleep(0.3)
@@ -193,6 +230,8 @@ class VideoPublisher:
         rtp_port: int,
         target_fps: int,
         bitrate_bps: int,
+        width: int,
+        height: int,
     ) -> str:
         # rpicam-vid drives the hardware encoder; ffmpeg handles RTP packetization only.
         # target_fps == 0 means uncapped: omit --framerate so the sensor runs at its
@@ -205,8 +244,8 @@ class VideoPublisher:
             "rpicam-vid",
             "-n",                                   # no preview
             "-t", "0",                              # run forever
-            "--width", str(FRAME_WIDTH),
-            "--height", str(FRAME_HEIGHT),
+            "--width", str(width),
+            "--height", str(height),
         ]
         if not uncapped:
             rpicam_args.extend(["--framerate", str(target_fps)])

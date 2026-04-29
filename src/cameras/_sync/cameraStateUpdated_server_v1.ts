@@ -27,9 +27,14 @@ export interface SyncParams {
       // Step-based zoom level reported by the Pi Zero (1..100). Ephemeral.
       zoomLevel?: number | null;
       // Admin-configured stream params. Broadcast from updateCamera_v1 so the
-      // cameras page reflects new quality/fps labels without a page reload.
+      // cameras page reflects new quality/fps/resolution/bitrate labels without
+      // a page reload. null on resolution/bitrate means "use the orchestrator
+      // fallback" (legacy DB rows that were never re-saved).
       targetFps?: number;
       quality?: 'low' | 'medium' | 'high';
+      resolutionWidth?: number | null;
+      resolutionHeight?: number | null;
+      bitrateBps?: number | null;
       // Hardware capability report sourced from the Pi Zero boot probe.
       // Refilled every telemetry tick so Pi 5 restarts self-heal in <5s.
       capabilities?: {
