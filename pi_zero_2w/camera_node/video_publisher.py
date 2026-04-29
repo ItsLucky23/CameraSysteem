@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
-import os
 import shlex
 import time
 
@@ -95,11 +93,6 @@ class VideoPublisher:
         # kicks again, and we loop forever.
         await self._kill_orphan_pipelines()
 
-        # Truncate the metadata file before each fresh spawn so the IR lux
-        # sampler doesn't read frames from a previous pipeline run.
-        with contextlib.suppress(OSError):
-            with open(_METADATA_FILE_PATH, "w", encoding="utf-8") as handle:
-                handle.truncate()
 
         cmd = self._build_pipeline_command(
             rtp_host=rtp_host,
@@ -160,11 +153,6 @@ class VideoPublisher:
         self._last_frame_at = None
         self._last_frame_count = 0
         self._last_stall_warn_at = 0.0
-
-        # Drop the metadata file so the IR auto controller falls back to
-        # "no lux available" while the stream is offline.
-        with contextlib.suppress(OSError):
-            os.unlink(_METADATA_FILE_PATH)
 
         if self._stall_watchdog_task is not None:
             self._stall_watchdog_task.cancel()
@@ -282,11 +270,6 @@ class VideoPublisher:
             "--intra", str(keyframe_interval),
             "--profile", "baseline",
             "--level", "4.2",
-            # Per-frame metadata (Lux, ExposureTime, AnalogueGain, ...) for the
-            # IR auto controller. The lux sampler reads only the most recent
-            # object and truncates after each successful read.
-            "--metadata", _METADATA_FILE_PATH,
-            "--metadata-format", "json",
             "-o", "-",
         ])
 

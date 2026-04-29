@@ -126,13 +126,15 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 logger.warning("Failed to initialize IR GPIO device: %s", error)
                 self._ir_device = None
 
-        # Lux sampler runs continuously regardless of mode — auto needs it,
-        # and keeping it warm means switching to auto reacts on the next tick.
-        if self._lux_sampler_task is None or self._lux_sampler_task.done():
-            self._lux_sampler_task = asyncio.create_task(
-                self._lux_sampler_loop(),
-                name="ir-lux-sampler",
-            )
+        # IR auto lux sampler is currently disabled — the rpicam-vid --metadata
+        # path conflicted with the H.264 stream and caused black previews. Auto
+        # mode falls through to "off" until we have a working lux source. To
+        # re-enable: restore --metadata in video_publisher and uncomment below.
+        # if self._lux_sampler_task is None or self._lux_sampler_task.done():
+        #     self._lux_sampler_task = asyncio.create_task(
+        #         self._lux_sampler_loop(),
+        #         name="ir-lux-sampler",
+        #     )
 
         if self._pan_servo_gpio_pin is not None:
             try:
