@@ -1,4 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- tells linting to not get upset for exporting a non react hook in this file */
+import type { JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createBrowserRouter, Outlet, RouterProvider, useParams, useSearchParams } from 'react-router-dom'
 import { Toaster } from 'sonner'

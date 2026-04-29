@@ -80,13 +80,8 @@ export const enqueueCommand = async ({
   cameraId: string;
   commandId: string;
   action: string;
-  // unknown so callers can pass arrays / nested objects (e.g., setLogFlags
-  // payload is { features: string[] }). The wire format is JSON regardless.
   payload?: Record<string, unknown>;
   requestedByUserId: string;
-  // When set, drop any queued items with this action before pushing the new
-  // one. Used by irSetStrength so a flurry of slider drags collapses to the
-  // newest value before the Pi Zero ever sees them.
   coalesceAction?: string;
 }): Promise<{
   queued: boolean;

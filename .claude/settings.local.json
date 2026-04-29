@@ -7,7 +7,9 @@
       "Bash(python -m py_compile pi_zero_2w/camera_node/boot_probe.py pi_zero_2w/camera_node/thumbnail_publisher.py pi_zero_2w/camera_node/runtime.py pi_zero_2w/camera_node/telemetry.py pi_zero_2w/camera_node/api_client.py pi_zero_2w/camera_node/command_executor.py pi_zero_2w/camera_node/models.py pi_zero_2w/camera_node/adapters/base.py pi_zero_2w/camera_node/adapters/mock_adapter.py pi_zero_2w/camera_node/adapters/raspberry_pi_adapter.py pi_zero_2w/camera_node/video_publisher.py)",
       "Bash(python -c ' *)",
       "Bash(python *)",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(npm run *)",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

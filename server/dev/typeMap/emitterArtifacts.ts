@@ -61,6 +61,19 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 	const sourceFile = ts.createSourceFile('apiTypes.generated.ts', content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 	const knownSymbols = new Set<string>();
 	const referencedSymbols = new Set<string>();
+	const referenceLocations = new Map<string, Array<{ line: number; column: number; snippet: string }>>();
+	// Tracks where each referenced identifier appears so the failure message can
+	// point at a real source line (otherwise an empty/whitespace identifier is
+	// invisible and impossible to debug).
+	const recordReferenceLocation = (name: string, refNode: ts.Node): void => {
+		const { line, character } = sourceFile.getLineAndCharacterOfPosition(refNode.getStart(sourceFile));
+		const lineStart = sourceFile.getLineStarts()[line] ?? 0;
+		const nextLineStart = sourceFile.getLineStarts()[line + 1] ?? content.length;
+		const snippet = content.slice(lineStart, nextLineStart).replace(/\r?\n$/, '');
+		const list = referenceLocations.get(name) ?? [];
+		list.push({ line: line + 1, column: character + 1, snippet });
+		referenceLocations.set(name, list);
+	};
 
 	const builtIns = new Set([
 		'string', 'number', 'boolean', 'null', 'undefined', 'unknown', 'any', 'never', 'void', 'object', 'bigint', 'symbol',
@@ -114,9 +127,11 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 			const typeName = node.typeName;
 			if (ts.isIdentifier(typeName)) {
 				referencedSymbols.add(typeName.text);
+				recordReferenceLocation(typeName.text, typeName);
 			}
 			if (ts.isQualifiedName(typeName) && ts.isIdentifier(typeName.left)) {
 				referencedSymbols.add(typeName.left.text);
+				recordReferenceLocation(typeName.left.text, typeName.left);
 			}
 		}
 
@@ -130,9 +145,13 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 		.sort();
 
 	if (unknown.length > 0) {
-		// Print raw values so empty/whitespace identifiers don't disappear in the
-		// thrown message. Helps when the generator produces a malformed reference.
 		console.error('[TypeMapGenerator] unresolved identifiers raw:', JSON.stringify(unknown));
+		for (const name of unknown) {
+			const locations = referenceLocations.get(name) ?? [];
+			for (const loc of locations) {
+				console.error(`[TypeMapGenerator]   "${name}" at line ${loc.line} col ${loc.column}: ${loc.snippet}`);
+			}
+		}
 		throw new Error(`[TypeMapGenerator] Generated type map has unresolved type identifiers: ${unknown.map((name) => `"${name}"`).join(', ')}`);
 	}
 };

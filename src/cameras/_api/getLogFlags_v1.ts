@@ -18,14 +18,14 @@ export interface ApiParams {
   functions: Functions;
 }
 
-export const main = ({ data }: ApiParams): Promise<ApiResponse> => {
+export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
   const cameraId = data.cameraId.trim();
   if (!cameraId) {
-    return Promise.resolve({ status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 });
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
-  return Promise.resolve({
+  return {
     status: 'success',
     cameraId,
     features: getLogFlagsForCamera(cameraId) as string[],
-  });
+  };
 };

@@ -1,5 +1,5 @@
 import redis from '../functions/redis';
-import { getIoInstance } from '../sockets/socket';
+import { getIoInstance } from '../sockets/ioSingleton';
 
 type CameraAccessLike = {
   canPreview?: boolean;

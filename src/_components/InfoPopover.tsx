@@ -49,7 +49,7 @@ export default function InfoPopover({ title, body, ariaLabel }: Props) {
   useEffect(() => {
     if (!open) {
       setCoords(null);
-      return undefined;
+      return;
     }
 
     setCoords(computeCoords());

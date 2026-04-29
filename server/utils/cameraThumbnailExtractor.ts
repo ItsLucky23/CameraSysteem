@@ -1,4 +1,5 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 import { createSocket } from 'node:dgram';
 import { writeFile, unlink } from 'node:fs/promises';
 import os from 'node:os';
@@ -31,7 +32,7 @@ const EOI_LOW = 0xd9;
 
 interface ExtractorState {
   cameraId: string;
-  ffmpeg: ChildProcessWithoutNullStreams;
+  ffmpeg: ChildProcessByStdio<null, Readable, Readable>;
   unsubscribeRtp: () => void;
   cleanup: () => void;
   buffer: Buffer;
@@ -202,7 +203,7 @@ const start = async (cameraId: string): Promise<void> => {
     'pipe:1',
   ];
 
-  let ffmpegProcess: ChildProcessWithoutNullStreams;
+  let ffmpegProcess: ChildProcessByStdio<null, Readable, Readable>;
   try {
     ffmpegProcess = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
   } catch (spawnError) {

@@ -13,7 +13,12 @@ const stripDefaultValues = (params: string): string => {
 };
 
 const normalizeInlineType = (value: string): string => {
-  return value.replace(/\s+/g, ' ').trim();
+  // Strip line/block comments BEFORE collapsing whitespace. Otherwise a `//`
+  // comment inside a multi-line type signature would swallow the rest of the
+  // signature once newlines are gone, producing malformed generated types.
+  const withoutBlockComments = value.replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const withoutLineComments = withoutBlockComments.replace(/\/\/[^\n\r]*/g, ' ');
+  return withoutLineComments.replace(/\s+/g, ' ').trim();
 };
 
 const simplifyInferredType = (value: string): string => {
