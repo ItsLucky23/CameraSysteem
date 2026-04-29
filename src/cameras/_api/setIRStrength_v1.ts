@@ -2,6 +2,7 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
 import { canControlCamera, emitCameraSyncEvent, getCameraRoomCode } from '../../../server/utils/cameraHelpers';
+import { isCameraLogEnabled } from '../../../server/utils/cameraLogFlagStore';
 
 export const rateLimit: number | false = 60;
 
@@ -29,6 +30,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   if (!cameraId || !isValidStrength(strength)) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (isCameraLogEnabled(cameraId, 'ir')) {
+    console.log(`[ir] cameras/setIRStrength cameraId=${cameraId} userId=${user.id} strength=${String(strength)}`);
   }
 
   const [cameraFetchError, cameraFetchResult] = await tryCatch(async () => {
@@ -94,6 +99,9 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       action: 'irSetStrength',
       payload,
       requestedByUserId: user.id,
+      // Drop any older queued irSetStrength so rapid slider drags don't pile
+      // up on the Pi Zero — the user only ever sees the latest value.
+      coalesceAction: 'irSetStrength',
     });
   });
 

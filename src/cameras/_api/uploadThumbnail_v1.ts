@@ -3,6 +3,7 @@ import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated
 import { tryCatch } from '../../../server/functions/tryCatch';
 import { emitCameraSyncEvent, getCameraRoomCode } from '../../../server/utils/cameraHelpers';
 import { setThumbnail } from '../../../server/utils/cameraThumbnailStore';
+import { onThumbnailUpdated } from '../../../server/utils/cameraIRController';
 
 export const rateLimit: number | false = 240;
 export const httpMethod: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'POST';
@@ -96,6 +97,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   const cameraId = camera.id;
 
   setThumbnail(cameraId, jpegBase64, capturedAt);
+
+  // Fire-and-forget auto-IR evaluation. Errors are swallowed inside the
+  // controller so a sharp decode failure can't break thumbnail ingestion.
+  void onThumbnailUpdated({ cameraId, jpegBase64 });
 
   console.log('');
   console.log(

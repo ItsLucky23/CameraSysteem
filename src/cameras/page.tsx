@@ -189,6 +189,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   // Cleared once a sync event echoes a matching irStrength.
   const [irStrengthDraft, setIrStrengthDraft] = useState<number | null>(null);
 
+  // Admin-only per-camera debug logging flags. Map of cameraId -> Set of
+  // active feature names. Hydrated lazily on camera select; updated via the
+  // logFlagsUpdated sync event so multiple admin tabs stay aligned.
+  const [logFlagsByCamera, setLogFlagsByCamera] = useState<Record<string, string[]>>({});
+
   // Control session — null = no one, otherwise { userId, name, expiresAt }.
   const [controlSession, setControlSession] = useState<ControlSessionState | null>(null);
   const [acquiringControl, setAcquiringControl] = useState<boolean>(false);
@@ -379,6 +384,42 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     return () => { void leaveRoom(roomCode); };
   }, [selectedCameraId]);
 
+  // Hydrate the debug logging panel for the selected camera (admin only). The
+  // store is in-memory so we always re-fetch when switching cameras and on
+  // any reload of this page.
+  useEffect(() => {
+    if (!selectedCameraId || !session?.admin) return;
+    void (async () => {
+      const response = await apiRequest({
+        name: 'cameras/getLogFlags',
+        version: 'v1',
+        data: { cameraId: selectedCameraId },
+      });
+      if (response.status !== 'success') return;
+      setLogFlagsByCamera((previous) => ({
+        ...previous,
+        [response.cameraId]: response.features,
+      }));
+    })();
+  }, [selectedCameraId, session?.admin]);
+
+  const toggleLogFlag = useCallback(async (feature: string, enabled: boolean) => {
+    if (!selectedCameraId) return;
+    const response = await apiRequest({
+      name: 'cameras/setLogFlag',
+      version: 'v1',
+      data: { cameraId: selectedCameraId, feature, enabled },
+    });
+    if (response.status !== 'success') {
+      notify.error({ key: response.errorCode });
+      return;
+    }
+    setLogFlagsByCamera((previous) => ({
+      ...previous,
+      [response.cameraId]: response.features,
+    }));
+  }, [selectedCameraId]);
+
   useEffect(() => {
     const unsubscribeState = upsertSyncEventCallback({
       name: 'cameras/cameraStateUpdated',
@@ -455,6 +496,17 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       },
     });
 
+    const unsubscribeLogFlags = upsertSyncEventCallback({
+      name: 'cameras/logFlagsUpdated',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        setLogFlagsByCamera((previous) => ({
+          ...previous,
+          [serverOutput.cameraId]: serverOutput.features,
+        }));
+      },
+    });
+
     const unsubscribeThumbnail = upsertSyncEventCallback({
       name: 'cameras/thumbnailUpdated',
       version: 'v1',
@@ -497,6 +549,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       unsubscribeState();
       unsubscribeCommand();
       unsubscribeForcedLeave();
+      unsubscribeLogFlags();
       unsubscribeThumbnail();
       unsubscribeRecording();
       unsubscribeControlSession();
@@ -553,23 +606,42 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     if (response.status === 'error') notify.error({ key: response.errorCode });
   }, [selectedCameraId]);
 
-  const setIRStrength = useCallback(async (strength: number) => {
+  // Trailing-edge debounce on the slider commit: when the user nudges the
+  // slider repeatedly, only the most recent value lands in the API call. The
+  // server-side coalescing in cameraNode.enqueueCommand handles the multi-tab
+  // case; this just keeps the network quiet for one user holding the slider.
+  const irStrengthCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setIRStrength = useCallback((strength: number) => {
     if (!selectedCameraId) return;
     setIrStrengthDraft(strength);
-    const response = await apiRequest({
-      name: 'cameras/setIRStrength',
-      version: 'v1',
-      data: { cameraId: selectedCameraId, strength },
-    });
-    if (response.status === 'error') {
-      setIrStrengthDraft(null);
-      notify.error({ key: response.errorCode });
-      return;
+    if (irStrengthCommitTimeoutRef.current) {
+      clearTimeout(irStrengthCommitTimeoutRef.current);
     }
-    // Server accepted; the sync event will refresh cameraState shortly. Clear
-    // the draft so future external changes (e.g., another operator) win.
-    setIrStrengthDraft(null);
+    irStrengthCommitTimeoutRef.current = setTimeout(async () => {
+      irStrengthCommitTimeoutRef.current = null;
+      const response = await apiRequest({
+        name: 'cameras/setIRStrength',
+        version: 'v1',
+        data: { cameraId: selectedCameraId, strength },
+      });
+      if (response.status === 'error') {
+        setIrStrengthDraft(null);
+        notify.error({ key: response.errorCode });
+        return;
+      }
+      // Sync event will refresh cameraState shortly; clear the draft so any
+      // external change (another operator, auto-mode commit) wins.
+      setIrStrengthDraft(null);
+    }, 250);
   }, [selectedCameraId]);
+
+  useEffect(() => {
+    return () => {
+      if (irStrengthCommitTimeoutRef.current) {
+        clearTimeout(irStrengthCommitTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const setRecording = useCallback(async (recording: boolean) => {
     if (!selectedCameraId) return;
@@ -1452,6 +1524,37 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                     )}
                   </div>
                 </section>
+
+                {session?.admin && selectedCameraId && (() => {
+                  const activeFlags = new Set(logFlagsByCamera[selectedCameraId] ?? []);
+                  const features: Array<{ key: 'ir' | 'recording' | 'performance' | 'streamPipeline' | 'commandQueue'; label: string }> = [
+                    { key: 'ir', label: translate({ key: 'aperture.monitor.debugFeatureIr' }) },
+                    { key: 'recording', label: translate({ key: 'aperture.monitor.debugFeatureRecording' }) },
+                    { key: 'performance', label: translate({ key: 'aperture.monitor.debugFeaturePerformance' }) },
+                    { key: 'streamPipeline', label: translate({ key: 'aperture.monitor.debugFeatureStream' }) },
+                    { key: 'commandQueue', label: translate({ key: 'aperture.monitor.debugFeatureCommands' }) },
+                  ];
+                  return (
+                    <section className="rounded-2xl border border-container1-border bg-container1 p-4">
+                      <div className="mb-3 flex items-center justify-between text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">
+                        <span>{translate({ key: 'aperture.monitor.debugLogging' })}</span>
+                        <span className="font-mono normal-case tracking-normal text-[10px] text-muted/70">{translate({ key: 'aperture.monitor.debugLoggingHint' })}</span>
+                      </div>
+                      <div className="flex flex-col gap-2.5">
+                        {features.map((feature) => (
+                          <label key={feature.key} className="flex items-center justify-between text-[12.5px] text-title">
+                            <span>{feature.label}</span>
+                            <Toggle
+                              on={activeFlags.has(feature.key)}
+                              onChange={(next) => { void toggleLogFlag(feature.key, next); }}
+                              ariaLabel={feature.label}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })()}
 
                 <section className="rounded-2xl border border-container1-border bg-container1 p-4">
                   <div className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.monitor.recording' })}</div>

@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from camera_node.adapters.base import HardwareAdapter
+from camera_node.log_flags import is_log_enabled, set_log_flags
 from camera_node.models import CameraCommand, CommandResult
 
 
@@ -21,6 +22,13 @@ class CommandExecutor:
         print("")
         print(f"[executor] action={command.action} payload={command.payload}")
         logger.info("Executing command %s (%s)", command.command_id, command.action)
+        if is_log_enabled("commandQueue"):
+            logger.info(
+                "[commandQueue] received id=%s action=%s payload=%r",
+                command.command_id,
+                command.action,
+                command.payload,
+            )
 
         if not command.command_id or not command.action:
             return CommandResult(
@@ -99,6 +107,17 @@ class CommandExecutor:
                 )
             elif command.action == "stopVideoStream":
                 await self._adapter.stop_video_stream()
+            elif command.action == "setLogFlags":
+                features = _parse_log_flags(command.payload)
+                if features is None:
+                    return CommandResult(
+                        command_id=command.command_id,
+                        action=command.action,
+                        result="rejected",
+                        reason_code="camera.invalidInput",
+                    )
+                applied = set_log_flags(features)
+                logger.info("[log-flags] active features now: %s", sorted(applied))
             else:
                 return CommandResult(
                     command_id=command.command_id,
@@ -181,6 +200,18 @@ def _validate_start_video_stream(
         height = height_raw
 
     return rtp_host, rtp_port_raw, target_fps_raw, bitrate_bps_raw, width, height
+
+
+def _parse_log_flags(payload: dict[str, Any]) -> set[str] | None:
+    raw = payload.get("features")
+    if not isinstance(raw, list):
+        return None
+    cleaned: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            return None
+        cleaned.add(item)
+    return cleaned
 
 
 def _parse_strength(payload: dict[str, Any], *, default_when_missing: int | None) -> int | None:

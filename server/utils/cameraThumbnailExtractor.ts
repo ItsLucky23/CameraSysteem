@@ -7,6 +7,7 @@ import path from 'node:path';
 import { tryCatch } from '../functions/tryCatch';
 import { emitCameraSyncEvent, getCameraRoomCode } from './cameraHelpers';
 import { setThumbnail } from './cameraThumbnailStore';
+import { onThumbnailUpdated } from './cameraIRController';
 import { subscribeRtp } from './cameraWebrtcBridge';
 
 // Pi 5-side thumbnail extractor. The Pi Zero's rpicam-jpeg path can't share
@@ -60,6 +61,11 @@ const handleJpegFrame = (cameraId: string, jpegBytes: Buffer): void => {
   const jpegBase64 = jpegBytes.toString('base64');
 
   setThumbnail(cameraId, jpegBase64, capturedAt);
+
+  // Drive the auto-IR controller off the same JPEGs we already produce here.
+  // Cadence is THUMBNAIL_INTERVAL_SEC (30s by default) — drop that constant
+  // for snappier auto-IR reaction at the cost of more sync broadcasts.
+  void onThumbnailUpdated({ cameraId, jpegBase64 });
 
   const capturedAtIso = capturedAt.toISOString();
 

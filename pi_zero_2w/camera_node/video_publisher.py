@@ -5,6 +5,8 @@ import logging
 import shlex
 import time
 
+from camera_node.log_flags import is_log_enabled
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,11 +17,6 @@ logger = logging.getLogger(__name__)
 FRAME_WIDTH = 1920
 FRAME_HEIGHT = 1080
 
-# rpicam-vid writes one JSON metadata object per frame to this path when
-# --metadata is in use. The IR auto controller tails this file to read Lux.
-# Single fixed path because there is one camera per Pi Zero — multi-camera
-# would need a per-port suffix.
-_METADATA_FILE_PATH = "/tmp/luckystack_camera_metadata.jsonl"
 
 
 class VideoPublisher:
@@ -115,7 +112,10 @@ class VideoPublisher:
             rtp_host,
             rtp_port,
         )
-        logger.info("Starting video stream: %s", cmd)
+        if is_log_enabled("streamPipeline"):
+            logger.info("[streamPipeline] spawn: %s", cmd)
+        else:
+            logger.info("Starting video stream")
 
         self._process = await asyncio.create_subprocess_shell(
             cmd,
@@ -194,12 +194,6 @@ class VideoPublisher:
         age_ms = int(max(0.0, (time.monotonic() - self._last_frame_at) * 1000))
         return self._measured_fps, age_ms
 
-    @staticmethod
-    def metadata_file_path() -> str:
-        """Path to the rpicam-vid per-frame metadata file. Read-only consumers
-        (e.g., the IR auto lux sampler in the adapter) use this to locate the
-        file without duplicating the convention."""
-        return _METADATA_FILE_PATH
 
     @staticmethod
     async def _kill_orphan_pipelines() -> None:
@@ -394,6 +388,11 @@ class VideoPublisher:
             # at DEBUG level.
             logger.info("video pipeline: %s", text)
             return
+
+        if is_log_enabled("performance"):
+            # When perf logging is on, surface every ffmpeg progress key so the
+            # admin can compare measured fps to target, watch bitrate drift, etc.
+            logger.info("[performance] %s", text)
 
         key, _, value = text.partition("=")
         key = key.strip()

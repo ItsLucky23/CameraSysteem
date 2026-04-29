@@ -1,4 +1,5 @@
 import redis, { redisSubscriber } from './redis';
+import { isCameraLogEnabled } from '../utils/cameraLogFlagStore';
 
 const projectPrefix = process.env.PROJECT_NAME ? `${process.env.PROJECT_NAME}-` : '';
 const NODE_COMMAND_CHANNEL = `${projectPrefix}camera-node:commands`;
@@ -73,6 +74,7 @@ export const enqueueCommand = async ({
   action,
   payload,
   requestedByUserId,
+  coalesceAction,
 }: {
   cameraIp: string;
   cameraId: string;
@@ -80,6 +82,10 @@ export const enqueueCommand = async ({
   action: string;
   payload?: Record<string, string | number | boolean | null>;
   requestedByUserId: string;
+  // When set, drop any queued items with this action before pushing the new
+  // one. Used by irSetStrength so a flurry of slider drags collapses to the
+  // newest value before the Pi Zero ever sees them.
+  coalesceAction?: string;
 }): Promise<{
   queued: boolean;
   publishedReceivers: number;
@@ -105,6 +111,36 @@ export const enqueueCommand = async ({
   const message = JSON.stringify(command);
   const queueKey = getNodeQueueKey(normalizedCameraIp);
 
+  if (coalesceAction) {
+    // Best-effort coalesce: read the queue, drop matching actions, replace.
+    // Race-safe against the Pi Zero's LPOP — worst case a single duplicate
+    // sneaks through, which the Pi Zero just applies.
+    const existing = await redis.lrange(queueKey, 0, -1);
+    const kept: string[] = [];
+    let dropped = 0;
+    for (const item of existing) {
+      try {
+        const parsed = JSON.parse(item) as { action?: string };
+        if (parsed.action === coalesceAction) {
+          dropped += 1;
+          continue;
+        }
+      } catch {
+        // keep unparseable items intact
+      }
+      kept.push(item);
+    }
+    if (dropped > 0) {
+      const tx = redis.multi();
+      tx.del(queueKey);
+      if (kept.length > 0) tx.rpush(queueKey, ...kept);
+      await tx.exec();
+      console.log(
+        `[cam ${cameraId}] coalesced ${String(dropped)} queued ${coalesceAction} command(s) before enqueueing ${commandId}`,
+      );
+    }
+  }
+
   await redis.rpush(queueKey, message);
   await redis.expire(queueKey, 60 * 60 * 24);
 
@@ -113,6 +149,12 @@ export const enqueueCommand = async ({
   console.log(
     `[cam ${cameraId}] enqueueCommand action=${action} commandId=${commandId} ip=${normalizedCameraIp} pubReceivers=${String(publishedReceivers)}`,
   );
+
+  if (isCameraLogEnabled(cameraId, 'commandQueue')) {
+    console.log(
+      `[commandQueue] cameraId=${cameraId} action=${action} payload=${JSON.stringify(payload ?? {})} requestedBy=${requestedByUserId}`,
+    );
+  }
 
   return {
     queued: true,
