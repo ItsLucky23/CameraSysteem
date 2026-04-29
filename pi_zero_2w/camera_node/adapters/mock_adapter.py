@@ -24,6 +24,8 @@ class MockHardwareAdapter(HardwareAdapter):
             mode="live",
             ir_mode="auto",
             ir_enabled=False,
+            ir_strength=100,
+            ir_active_strength=0,
             pan=0,
             tilt=0,
             temperature_c=None,
@@ -48,6 +50,8 @@ class MockHardwareAdapter(HardwareAdapter):
             mode=self._state.mode,
             ir_mode=self._state.ir_mode,
             ir_enabled=self._state.ir_enabled,
+            ir_strength=self._state.ir_strength,
+            ir_active_strength=self._state.ir_active_strength,
             pan=self._state.pan,
             tilt=self._state.tilt,
             temperature_c=self._state.temperature_c,
@@ -66,13 +70,28 @@ class MockHardwareAdapter(HardwareAdapter):
         await asyncio.sleep(0)
         self._state.tilt = _clamp(self._state.tilt + delta, -90, 90)
 
-    async def set_ir_mode(self, mode: str) -> None:
+    async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
         await asyncio.sleep(0)
         self._state.ir_mode = mode
         if mode == "on":
-            self._state.ir_enabled = True
+            if strength is not None:
+                self._state.ir_strength = _clamp(strength, 0, 100)
+            self._state.ir_active_strength = self._state.ir_strength
+            self._state.ir_enabled = self._state.ir_strength > 0
         elif mode == "off":
+            self._state.ir_active_strength = 0
             self._state.ir_enabled = False
+        elif mode == "auto":
+            # Mock can't read lux, so fake mid-level so the UI has something to show.
+            self._state.ir_active_strength = 50
+            self._state.ir_enabled = True
+
+    async def set_ir_strength(self, strength: int) -> None:
+        await asyncio.sleep(0)
+        self._state.ir_strength = _clamp(strength, 0, 100)
+        if self._state.ir_mode == "on":
+            self._state.ir_active_strength = self._state.ir_strength
+            self._state.ir_enabled = self._state.ir_strength > 0
 
     async def set_recording(self, recording: bool) -> None:
         await asyncio.sleep(0)

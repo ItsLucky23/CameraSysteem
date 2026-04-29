@@ -75,6 +75,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       mode: camera.mode,
       irMode: camera.irMode,
       irEnabled: camera.irEnabled,
+      irStrength: camera.irStrength ?? 100,
+      // irActiveStrength is filled by telemetry from the Pi Zero. Until the
+      // first telemetry tick arrives, mirror irStrength when 'on', null otherwise.
+      irActiveStrength: camera.irMode === 'on' ? (camera.irStrength ?? 100) : (camera.irMode === 'off' ? 0 : null),
       pan: camera.pan,
       tilt: camera.tilt,
       temperatureC: camera.temperatureC ?? null,

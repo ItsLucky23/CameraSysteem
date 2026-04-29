@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import os
 import shlex
 import time
 
@@ -14,6 +16,12 @@ logger = logging.getLogger(__name__)
 # whose command payloads don't yet carry width/height.
 FRAME_WIDTH = 1920
 FRAME_HEIGHT = 1080
+
+# rpicam-vid writes one JSON metadata object per frame to this path when
+# --metadata is in use. The IR auto controller tails this file to read Lux.
+# Single fixed path because there is one camera per Pi Zero — multi-camera
+# would need a per-port suffix.
+_METADATA_FILE_PATH = "/tmp/luckystack_camera_metadata.jsonl"
 
 
 class VideoPublisher:
@@ -87,6 +95,12 @@ class VideoPublisher:
         # kicks again, and we loop forever.
         await self._kill_orphan_pipelines()
 
+        # Truncate the metadata file before each fresh spawn so the IR lux
+        # sampler doesn't read frames from a previous pipeline run.
+        with contextlib.suppress(OSError):
+            with open(_METADATA_FILE_PATH, "w", encoding="utf-8") as handle:
+                handle.truncate()
+
         cmd = self._build_pipeline_command(
             rtp_host=rtp_host,
             rtp_port=rtp_port,
@@ -147,6 +161,11 @@ class VideoPublisher:
         self._last_frame_count = 0
         self._last_stall_warn_at = 0.0
 
+        # Drop the metadata file so the IR auto controller falls back to
+        # "no lux available" while the stream is offline.
+        with contextlib.suppress(OSError):
+            os.unlink(_METADATA_FILE_PATH)
+
         if self._stall_watchdog_task is not None:
             self._stall_watchdog_task.cancel()
             self._stall_watchdog_task = None
@@ -186,6 +205,13 @@ class VideoPublisher:
 
         age_ms = int(max(0.0, (time.monotonic() - self._last_frame_at) * 1000))
         return self._measured_fps, age_ms
+
+    @staticmethod
+    def metadata_file_path() -> str:
+        """Path to the rpicam-vid per-frame metadata file. Read-only consumers
+        (e.g., the IR auto lux sampler in the adapter) use this to locate the
+        file without duplicating the convention."""
+        return _METADATA_FILE_PATH
 
     @staticmethod
     async def _kill_orphan_pipelines() -> None:
@@ -256,6 +282,11 @@ class VideoPublisher:
             "--intra", str(keyframe_interval),
             "--profile", "baseline",
             "--level", "4.2",
+            # Per-frame metadata (Lux, ExposureTime, AnalogueGain, ...) for the
+            # IR auto controller. The lux sampler reads only the most recent
+            # object and truncates after each successful read.
+            "--metadata", _METADATA_FILE_PATH,
+            "--metadata-format", "json",
             "-o", "-",
         ])
 

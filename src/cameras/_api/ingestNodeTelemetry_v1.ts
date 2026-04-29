@@ -30,6 +30,8 @@ export interface ApiParams {
     mode?: CameraMode;
     irMode?: IRMode;
     irEnabled?: boolean;
+    irStrength?: number | null;
+    irActiveStrength?: number | null;
     pan?: number;
     tilt?: number;
     temperatureC?: number | null;
@@ -97,6 +99,8 @@ interface CameraStatePatch {
   mode?: CameraMode;
   irMode?: IRMode;
   irEnabled?: boolean;
+  irStrength?: number | null;
+  irActiveStrength?: number | null;
   pan?: number;
   tilt?: number;
   temperatureC?: number | null;
@@ -131,6 +135,12 @@ const buildCameraPatch = ({
   }
   if (data.irEnabled !== undefined) {
     patch.irEnabled = data.irEnabled;
+  }
+  if (data.irStrength !== undefined) {
+    patch.irStrength = data.irStrength;
+  }
+  if (data.irActiveStrength !== undefined) {
+    patch.irActiveStrength = data.irActiveStrength;
   }
   if (data.pan !== undefined) {
     patch.pan = data.pan;
@@ -195,6 +205,24 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
 
   if (data.irEnabled !== undefined && typeof data.irEnabled !== 'boolean') {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (data.irStrength !== undefined && data.irStrength !== null) {
+    if (typeof data.irStrength !== 'number'
+      || !Number.isInteger(data.irStrength)
+      || data.irStrength < 0
+      || data.irStrength > 100) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
+  }
+
+  if (data.irActiveStrength !== undefined && data.irActiveStrength !== null) {
+    if (typeof data.irActiveStrength !== 'number'
+      || !Number.isInteger(data.irActiveStrength)
+      || data.irActiveStrength < 0
+      || data.irActiveStrength > 100) {
+      return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+    }
   }
 
   if (data.pan !== undefined && typeof data.pan !== 'number') {

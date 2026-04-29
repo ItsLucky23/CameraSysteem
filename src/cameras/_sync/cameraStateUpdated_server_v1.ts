@@ -14,6 +14,11 @@ export interface SyncParams {
       mode?: 'off' | 'idle' | 'live' | 'record';
       irMode?: 'off' | 'on' | 'auto';
       irEnabled?: boolean;
+      // Persisted user-set strength (0..100). Manual control in 'on' mode.
+      irStrength?: number | null;
+      // Live PWM duty cycle the Pi Zero is actually driving right now.
+      // Telemetered from the auto controller; matches irStrength in 'on' mode.
+      irActiveStrength?: number | null;
       pan?: number;
       tilt?: number;
       temperatureC?: number | null;

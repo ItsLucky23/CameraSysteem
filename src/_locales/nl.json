@@ -94,6 +94,7 @@
       "irOff": "Uit",
       "irAuto": "Auto",
       "irOn": "Aan",
+      "irStrength": "Sterkte",
       "fps": "FPS",
       "quality": "Kwaliteit",
       "qualityLow": "Laag",
@@ -165,6 +166,31 @@
       "presetFpsOpt": "FPS optimaal",
       "presetQualityOpt": "Kwaliteit optimaal",
       "presetBestOfBoth": "Beste van beide",
+      "infoPresets": {
+        "title": "Stream presets",
+        "body1": "Elke preset is een afgestemde combinatie van resolutie, FPS, bitrate en kwaliteit. FPS optimaal kiest voor vloeiende beweging, Kwaliteit optimaal voor detail, en Beste van beide is een gebalanceerd middenpunt.",
+        "body2": "Kies een preset als startpunt en stel daarna de losse velden bij. De Pi Zero stream herstart binnen ongeveer 10 seconden nadat je opslaat."
+      },
+      "infoResolution": {
+        "title": "Resolutie",
+        "body1": "Een hogere resolutie betekent meer detail per frame, maar verbruikt meer bandbreedte en CPU. 1920x1080 is het maximum dat de Pi Zero 2W H.264 hardware-encoder bij lage FPS aankan. 1280x720 is de optimale keuze voor hoge FPS. 854x480 en 640x480 zijn beter wanneer het netwerk beperkt is of de camera een klein gebied dekt.",
+        "body2": "Een verdubbelde resolutie vraagt grofweg een verdubbelde bitrate. Ziet de stream er na een hogere resolutie blokkerig uit, verhoog dan ook de bitrate.",
+        "bodyWideLens": "Jouw camera is de IMX708 Wide Pi Camera 3 (~102 graden beeldhoek). Het bredere beeld toont meer scene per frame, met iets zachtere randen. Een hogere resolutie behoudt detail per object over dat grotere kijkveld, dus 1080p loont meer op een wide-lens dan op een standaard lens."
+      },
+      "infoFps": {
+        "title": "Beeldsnelheid",
+        "body1": "FPS bepaalt hoe vloeiend beweging eruitziet. 25 FPS oogt cinematisch, 50-60 FPS oogt live. De Pi Zero 2W H.264 hardware-encoder zit rond 28 FPS bij 1920x1080, dus voor hogere FPS moet je naar 1280x720 of lager.",
+        "bodyEdgeCase": "Als de stream bij hoge FPS een paar seconden bevriest, is de encoder kort overbelast. Verlaag de FPS of de bitrate, of kies een lagere resolutie."
+      },
+      "infoQuality": {
+        "title": "Kwaliteitslabel",
+        "body1": "Kwaliteit is een label dat een standaard bitrate kiest wanneer je er zelf geen invult. Zodra je een bitrate kiest, is kwaliteit nog enkel metadata voor sortering en presets. Stel de bitrate direct in voor voorspelbare resultaten."
+      },
+      "infoBitrate": {
+        "title": "Bitrate (Mbps)",
+        "body1": "De bitrate bepaalt hoeveel data de encoder per seconde mag besteden. Een hogere Mbps geeft schoner beeld en minder compressie-artefacten, maar gebruikt meer bandbreedte. 4 Mbps is comfortabel voor 720p, 8 Mbps voor 1080p, 12 Mbps is de bovengrens voordat de Pi Zero rendement verliest.",
+        "bodyEdgeCase": "Zie je pixels terwijl kwaliteit op hoog staat, dan is de bitrate te laag voor de gekozen resolutie en FPS. Verhoog de bitrate, niet de kwaliteit."
+      },
       "saveCamera": "Camera opslaan",
       "createCamera": "Camera aanmaken",
       "deleteCamera": "Camera verwijderen",

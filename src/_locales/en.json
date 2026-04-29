@@ -94,6 +94,7 @@
       "irOff": "Off",
       "irAuto": "Auto",
       "irOn": "On",
+      "irStrength": "Strength",
       "fps": "FPS",
       "quality": "Quality",
       "qualityLow": "Low",
@@ -165,6 +166,31 @@
       "presetFpsOpt": "FPS optimized",
       "presetQualityOpt": "Quality optimized",
       "presetBestOfBoth": "Best of both",
+      "infoPresets": {
+        "title": "Stream presets",
+        "body1": "Each preset is a curated combination of resolution, FPS, bitrate and quality. FPS optimized favors smooth motion, Quality optimized favors detail, Best of both is a balanced middle.",
+        "body2": "Pick a preset as a starting point, then fine-tune the individual fields. The Pi Zero stream restarts within ~10 seconds after you save."
+      },
+      "infoResolution": {
+        "title": "Resolution",
+        "body1": "Higher resolution means more detail per frame but consumes more bandwidth and CPU. 1920x1080 is the maximum the Pi Zero 2W H.264 encoder can sustain at low FPS. 1280x720 is the sweet spot for high frame rates. 854x480 and 640x480 are best when network is limited or the camera covers a small area.",
+        "body2": "Doubling resolution roughly doubles the bitrate you need. If the stream looks blocky after raising resolution, raise the bitrate too.",
+        "bodyWideLens": "Your camera is the IMX708 Wide Pi Camera 3 (~102 degree field of view). The wider angle covers more of the scene per frame, with slightly softer corners. Higher resolution preserves per-object detail across the larger viewing area, so 1080p pays off more on a wide lens than on a standard one."
+      },
+      "infoFps": {
+        "title": "Frame rate",
+        "body1": "FPS controls motion smoothness. 25 FPS feels cinematic, 50-60 FPS feels live. The Pi Zero 2W hardware H.264 encoder caps around 28 FPS at 1920x1080, so for higher frame rates you must drop to 1280x720 or lower.",
+        "bodyEdgeCase": "If the stream freezes for a few seconds at high FPS, the encoder is briefly overwhelmed. Drop the FPS or the bitrate, or pick a smaller resolution."
+      },
+      "infoQuality": {
+        "title": "Quality label",
+        "body1": "Quality is a label that picks a default bitrate when you have not set one explicitly. Once you pick a bitrate, quality is just metadata used for sorting and presets. Set the bitrate directly for predictable results."
+      },
+      "infoBitrate": {
+        "title": "Bitrate (Mbps)",
+        "body1": "Bitrate is how much data the encoder spends per second. Higher Mbps means cleaner image and less compression artefact, but more bandwidth. 4 Mbps is comfortable for 720p; 8 Mbps for 1080p; 12 Mbps is the upper limit before the Pi Zero hits diminishing returns.",
+        "bodyEdgeCase": "If you see pixelation while quality is set to high, the bitrate is too low for the chosen resolution and FPS. Raise the bitrate, do not raise quality."
+      },
       "saveCamera": "Save camera",
       "createCamera": "Create camera",
       "deleteCamera": "Remove camera",

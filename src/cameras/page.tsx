@@ -42,6 +42,7 @@ interface CameraListItem {
   isOnline: boolean;
   mode: 'off' | 'idle' | 'live' | 'record';
   irMode: 'off' | 'on' | 'auto';
+  irStrength: number;
   targetFps: number;
   quality: CameraQuality;
   canPreview: boolean;
@@ -62,6 +63,8 @@ interface CameraState {
   mode: 'off' | 'idle' | 'live' | 'record';
   irMode: 'off' | 'on' | 'auto';
   irEnabled: boolean;
+  irStrength: number;
+  irActiveStrength: number | null;
   pan: number;
   tilt: number;
   temperatureC: number | null;
@@ -180,6 +183,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const [recordingDurationLabel, setRecordingDurationLabel] = useState<string>('00:00:00');
   const seededRecordingForCameraIdRef = useRef<string | null>(null);
   const [recordingPending, setRecordingPending] = useState<'start' | 'stop' | null>(null);
+
+  // While the user drags the IR strength slider we render the draft value to
+  // avoid the slider snapping back to the server-acknowledged value mid-drag.
+  // Cleared once a sync event echoes a matching irStrength.
+  const [irStrengthDraft, setIrStrengthDraft] = useState<number | null>(null);
 
   // Control session — null = no one, otherwise { userId, name, expiresAt }.
   const [controlSession, setControlSession] = useState<ControlSessionState | null>(null);
@@ -540,6 +548,24 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       data: { cameraId: selectedCameraId, irMode },
     });
     if (response.status === 'error') notify.error({ key: response.errorCode });
+  }, [selectedCameraId]);
+
+  const setIRStrength = useCallback(async (strength: number) => {
+    if (!selectedCameraId) return;
+    setIrStrengthDraft(strength);
+    const response = await apiRequest({
+      name: 'cameras/setIRStrength',
+      version: 'v1',
+      data: { cameraId: selectedCameraId, strength },
+    });
+    if (response.status === 'error') {
+      setIrStrengthDraft(null);
+      notify.error({ key: response.errorCode });
+      return;
+    }
+    // Server accepted; the sync event will refresh cameraState shortly. Clear
+    // the draft so future external changes (e.g., another operator) win.
+    setIrStrengthDraft(null);
   }, [selectedCameraId]);
 
   const setRecording = useCallback(async (recording: boolean) => {
@@ -946,6 +972,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   }
 
   const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';
+  const currentIRStrength = cameraState?.irStrength ?? selectedCamera?.irStrength ?? 100;
+  const currentIRActiveStrength = cameraState?.irActiveStrength ?? null;
 
   const previewActionLabel = useMemo(() => {
     if (previewActive || previewStarting) {
@@ -1348,6 +1376,46 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                       );
                     })}
                   </div>
+                  {currentIRMode !== 'off' && (() => {
+                    // 'on' mode: user controls strength via the slider directly.
+                    // 'auto' mode: slider mirrors the auto controller's live value
+                    //              (irActiveStrength from telemetry) and is read-only.
+                    const sliderDisabled = currentIRMode === 'auto' || irDisabled;
+                    const displayStrength = currentIRMode === 'auto'
+                      ? (currentIRActiveStrength ?? 0)
+                      : (irStrengthDraft ?? currentIRStrength);
+                    return (
+                      <div className="mt-3 flex flex-col gap-1.5">
+                        <div className="flex items-baseline justify-between text-[11px] text-muted">
+                          <span>{translate({ key: 'aperture.monitor.irStrength' })}</span>
+                          <span className="font-mono font-medium text-title">{displayStrength}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          step={1}
+                          value={displayStrength}
+                          disabled={sliderDisabled}
+                          onChange={(event) => {
+                            const next = Number(event.target.value);
+                            if (Number.isFinite(next)) setIrStrengthDraft(next);
+                          }}
+                          onPointerUp={(event) => {
+                            const next = Number((event.target as HTMLInputElement).value);
+                            if (Number.isFinite(next)) void setIRStrength(next);
+                          }}
+                          onKeyUp={(event) => {
+                            // Keyboard adjustment (arrow keys) won't fire pointerup;
+                            // commit on key release for keyboard parity.
+                            const next = Number((event.target as HTMLInputElement).value);
+                            if (Number.isFinite(next)) void setIRStrength(next);
+                          }}
+                          className="h-1.5 w-full cursor-pointer accent-correct disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+                    );
+                  })()}
                 </section>
 
                 <section className="rounded-2xl border border-container1-border bg-container1 p-4">

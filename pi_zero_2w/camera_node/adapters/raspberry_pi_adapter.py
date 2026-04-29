@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import os
+import time
 # MOTION DETECTION LOGIC (start) — datetime/timezone were only used by motion callbacks
 # from datetime import datetime, timezone
 # MOTION DETECTION LOGIC (end)
@@ -13,6 +16,19 @@ from camera_node.video_publisher import VideoPublisher
 
 
 logger = logging.getLogger(__name__)
+
+
+# Lux thresholds drive the auto IR controller. Below LUX_FULL the LED runs at
+# 100% strength; above LUX_OFF it shuts off. Values in between map linearly.
+LUX_FULL = 5.0
+LUX_OFF = 30.0
+LUX_SAMPLE_INTERVAL_S = 5.0
+LUX_STALE_AFTER_S = 30.0
+LUX_EWMA_ALPHA = 0.4
+# Hysteresis: require this many consecutive 0-strength targets before the LED
+# actually switches off in auto mode. Prevents flicker when lux hovers around
+# LUX_OFF (e.g., a passing flashlight).
+AUTO_OFF_STREAK_THRESHOLD = 2
 
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:
@@ -59,11 +75,24 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._video_publisher = VideoPublisher()
         self._talkback_enabled = False
 
+        # IR PWM state. _ir_strength is the persisted user-set value (used in
+        # 'on' mode). _ir_active_strength reflects what the LED is actually
+        # being driven at right now — equals _ir_strength in 'on' mode, the
+        # auto controller's pick in 'auto', and 0 when off.
+        self._ir_strength: int = 100
+        self._ir_active_strength: int = 0
+        self._ir_lux_target_strength: int = 0
+        self._ir_off_streak: int = 0
+        self._lux_smoothed: float | None = None
+        self._lux_sampler_task: asyncio.Task[None] | None = None
+
         self._state = CameraState(
             is_online=True,
             mode="live",
             ir_mode="auto",
             ir_enabled=False,
+            ir_strength=100,
+            ir_active_strength=0,
             pan=0,
             tilt=0,
             temperature_c=None,
@@ -77,18 +106,33 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
 
     async def startup(self) -> None:
         try:
-            from gpiozero import AngularServo, OutputDevice  # type: ignore
+            from gpiozero import AngularServo, PWMOutputDevice  # type: ignore
         except Exception as error:  # noqa: BLE001
             logger.warning("Failed to import gpiozero drivers: %s", error)
             return
 
         if self._ir_gpio_pin is not None:
             try:
-                self._ir_device = OutputDevice(self._ir_gpio_pin, active_high=True, initial_value=False)
-                logger.info("IR device initialized on GPIO %s", self._ir_gpio_pin)
+                # 200 Hz: above human flicker, well below MOSFET switching limit
+                # and IR LED recovery time. Software PWM via lgpio works on
+                # the Pi Zero 2W without pigpio.
+                self._ir_device = PWMOutputDevice(
+                    self._ir_gpio_pin,
+                    frequency=200,
+                    initial_value=0.0,
+                )
+                logger.info("IR device initialized on GPIO %s (PWM @ 200 Hz)", self._ir_gpio_pin)
             except Exception as error:  # noqa: BLE001
                 logger.warning("Failed to initialize IR GPIO device: %s", error)
                 self._ir_device = None
+
+        # Lux sampler runs continuously regardless of mode — auto needs it,
+        # and keeping it warm means switching to auto reacts on the next tick.
+        if self._lux_sampler_task is None or self._lux_sampler_task.done():
+            self._lux_sampler_task = asyncio.create_task(
+                self._lux_sampler_loop(),
+                name="ir-lux-sampler",
+            )
 
         if self._pan_servo_gpio_pin is not None:
             try:
@@ -147,6 +191,12 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         await self._video_publisher.stop()
         await self._stop_recording_process()
 
+        if self._lux_sampler_task is not None:
+            self._lux_sampler_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._lux_sampler_task
+            self._lux_sampler_task = None
+
         self._close_servo(self._pan_servo)
         self._close_servo(self._tilt_servo)
         self._pan_servo = None
@@ -154,7 +204,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
 
         if self._ir_device is not None:
             with contextlib.suppress(Exception):
-                self._ir_device.off()
+                self._ir_device.value = 0.0  # type: ignore[attr-defined]
             with contextlib.suppress(Exception):
                 self._ir_device.close()
             self._ir_device = None
@@ -177,6 +227,8 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             mode=self._state.mode,
             ir_mode=self._state.ir_mode,
             ir_enabled=self._state.ir_enabled,
+            ir_strength=self._ir_strength,
+            ir_active_strength=self._ir_active_strength,
             pan=self._state.pan,
             tilt=self._state.tilt,
             temperature_c=self._state.temperature_c,
@@ -200,22 +252,158 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._state.tilt = _clamp(self._state.tilt + delta, -90, 90)
         self._set_servo_angle(self._tilt_servo, self._state.tilt)
 
-    async def set_ir_mode(self, mode: str) -> None:
+    async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
         self._state.ir_mode = mode
 
         if mode == "on":
-            self._state.ir_enabled = True
-            if self._ir_device is not None:
-                self._ir_device.on()
+            if strength is not None:
+                self._ir_strength = _clamp(strength, 0, 100)
+                self._state.ir_strength = self._ir_strength
+            self._apply_ir_pwm(self._ir_strength)
+            self._state.ir_enabled = self._ir_strength > 0
             return
 
         if mode == "off":
+            self._apply_ir_pwm(0)
             self._state.ir_enabled = False
-            if self._ir_device is not None:
-                self._ir_device.off()
             return
 
-        # auto mode keeps the currently resolved IR state unchanged.
+        if mode == "auto":
+            # Reset hysteresis so the controller picks fresh on the next sample.
+            self._ir_off_streak = 0
+            # Apply current lux-derived target immediately for snappy feedback;
+            # the sampler loop refines it within LUX_SAMPLE_INTERVAL_S.
+            self._apply_ir_pwm(self._ir_lux_target_strength)
+            self._state.ir_enabled = self._ir_lux_target_strength > 0
+            return
+
+    async def set_ir_strength(self, strength: int) -> None:
+        self._ir_strength = _clamp(strength, 0, 100)
+        self._state.ir_strength = self._ir_strength
+        # Only takes effect immediately in 'on' mode. In 'auto' the persisted
+        # value is updated for the next 'on' switch but the LED keeps tracking
+        # the lux-derived target; in 'off' nothing happens.
+        if self._state.ir_mode == "on":
+            self._apply_ir_pwm(self._ir_strength)
+            self._state.ir_enabled = self._ir_strength > 0
+
+    def _apply_ir_pwm(self, strength: int) -> None:
+        clamped = _clamp(strength, 0, 100)
+        self._ir_active_strength = clamped
+        self._state.ir_active_strength = clamped
+        if self._ir_device is None:
+            return
+        with contextlib.suppress(Exception):
+            self._ir_device.value = clamped / 100.0  # type: ignore[attr-defined]
+
+    async def _lux_sampler_loop(self) -> None:
+        # Reads rpicam-vid's per-frame metadata file. The video publisher
+        # opens it with --metadata; if the stream is not running the file is
+        # missing or stale and the controller falls back to no-lux behavior.
+        metadata_path = VideoPublisher.metadata_file_path()
+        try:
+            while True:
+                await asyncio.sleep(LUX_SAMPLE_INTERVAL_S)
+                lux = self._read_latest_lux(metadata_path)
+                if lux is None:
+                    self._lux_smoothed = None
+                else:
+                    if self._lux_smoothed is None:
+                        self._lux_smoothed = lux
+                    else:
+                        self._lux_smoothed = (
+                            LUX_EWMA_ALPHA * lux + (1.0 - LUX_EWMA_ALPHA) * self._lux_smoothed
+                        )
+                self._evaluate_auto_ir()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            logger.exception("Lux sampler loop crashed: %s", error)
+
+    @staticmethod
+    def _read_latest_lux(metadata_path: str) -> float | None:
+        # rpicam-vid appends one JSON object per frame to this file. We read
+        # only the tail end (last 8 KB) and parse the most recent complete
+        # object. Truncate the file after a successful read so it doesn't grow
+        # unbounded over a long recording.
+        try:
+            stat = os.stat(metadata_path)
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return None
+
+        if time.time() - stat.st_mtime > LUX_STALE_AFTER_S:
+            return None
+        if stat.st_size == 0:
+            return None
+
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as handle:
+                seek_to = max(0, stat.st_size - 8192)
+                handle.seek(seek_to)
+                tail = handle.read()
+        except OSError:
+            return None
+
+        # rpicam-vid emits objects newline-delimited or as a JSON array stream;
+        # tolerate both by extracting the last balanced { ... } block.
+        last_lux: float | None = None
+        depth = 0
+        start = -1
+        for index, char in enumerate(tail):
+            if char == "{":
+                if depth == 0:
+                    start = index
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    chunk = tail[start:index + 1]
+                    try:
+                        obj = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        start = -1
+                        continue
+                    if isinstance(obj, dict) and isinstance(obj.get("Lux"), (int, float)):
+                        last_lux = float(obj["Lux"])
+                    start = -1
+
+        if last_lux is not None:
+            with contextlib.suppress(OSError):
+                # Truncate to keep the file bounded; we already extracted what we need.
+                with open(metadata_path, "w", encoding="utf-8") as handle:
+                    handle.truncate()
+
+        return last_lux
+
+    def _evaluate_auto_ir(self) -> None:
+        if self._state.ir_mode != "auto":
+            return
+
+        lux = self._lux_smoothed
+        if lux is None:
+            target = 0
+        elif lux <= LUX_FULL:
+            target = 100
+        elif lux >= LUX_OFF:
+            target = 0
+        else:
+            ratio = (LUX_OFF - lux) / (LUX_OFF - LUX_FULL)
+            target = round(ratio * 100)
+
+        # Hysteresis only kicks in on the off transition. Other strength
+        # changes apply immediately so the dimmer tracks ambient light smoothly.
+        if target == 0 and self._ir_active_strength > 0:
+            self._ir_off_streak += 1
+            if self._ir_off_streak < AUTO_OFF_STREAK_THRESHOLD:
+                return
+        else:
+            self._ir_off_streak = 0
+
+        self._ir_lux_target_strength = target
+        self._apply_ir_pwm(target)
+        self._state.ir_enabled = target > 0
 
     async def set_recording(self, recording: bool) -> None:
         if recording:

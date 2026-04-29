@@ -10,6 +10,13 @@ class CameraState:
     mode: str = "live"
     ir_mode: str = "auto"
     ir_enabled: bool = False
+    # User-set persisted strength (0..100). Authoritative copy lives in the
+    # Pi 5 DB; the adapter mirrors it locally for fast control.
+    ir_strength: int = 100
+    # Live PWM duty cycle the LED is actually being driven at right now.
+    # Equals ir_strength in 'on' mode; the auto controller picks it in 'auto';
+    # 0 in 'off'.
+    ir_active_strength: int = 0
     pan: int = 0
     tilt: int = 0
     temperature_c: float | None = None

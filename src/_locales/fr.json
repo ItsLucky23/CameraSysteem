@@ -94,6 +94,7 @@
       "irOff": "Off",
       "irAuto": "Auto",
       "irOn": "On",
+      "irStrength": "Intensité",
       "fps": "FPS",
       "quality": "Qualité",
       "qualityLow": "Basse",
@@ -165,6 +166,31 @@
       "presetFpsOpt": "FPS optimisé",
       "presetQualityOpt": "Qualité optimisée",
       "presetBestOfBoth": "Meilleur des deux",
+      "infoPresets": {
+        "title": "Préréglages de flux",
+        "body1": "Chaque préréglage est une combinaison cohérente de résolution, FPS, débit et qualité. FPS optimisé privilégie la fluidité, Qualité optimisée privilégie le détail, Meilleur des deux est un compromis équilibré.",
+        "body2": "Choisissez un préréglage comme point de départ, puis ajustez les champs individuellement. Le flux du Pi Zero redémarre dans les ~10 secondes après l'enregistrement."
+      },
+      "infoResolution": {
+        "title": "Résolution",
+        "body1": "Une résolution plus élevée signifie plus de détails par image, mais consomme plus de bande passante et de CPU. 1920x1080 est le maximum que l'encodeur H.264 du Pi Zero 2W peut tenir à faible FPS. 1280x720 est l'idéal pour des fréquences d'images élevées. 854x480 et 640x480 sont préférables si le réseau est limité ou si la caméra couvre une petite zone.",
+        "body2": "Doubler la résolution exige grosso modo de doubler le débit. Si le flux paraît pixelisé après une montée en résolution, augmentez aussi le débit.",
+        "bodyWideLens": "Votre caméra est l'IMX708 Wide Pi Camera 3 (~102 degrés de champ). Le grand angle montre plus de scène par image, avec des bords légèrement plus mous. Une résolution plus élevée préserve le détail par objet sur ce champ plus large : la 1080p paie davantage sur un objectif large que sur un standard."
+      },
+      "infoFps": {
+        "title": "Cadence d'images",
+        "body1": "Les FPS contrôlent la fluidité du mouvement. 25 FPS donne un rendu cinéma, 50-60 FPS un rendu live. L'encodeur H.264 du Pi Zero 2W plafonne autour de 28 FPS en 1920x1080 — pour des FPS plus élevés, descendez à 1280x720 ou moins.",
+        "bodyEdgeCase": "Si le flux gèle quelques secondes à FPS élevé, l'encodeur sature brièvement. Réduisez les FPS ou le débit, ou choisissez une résolution plus petite."
+      },
+      "infoQuality": {
+        "title": "Étiquette qualité",
+        "body1": "Qualité est une étiquette qui choisit un débit par défaut quand vous n'en spécifiez pas. Une fois le débit fixé, qualité n'est plus qu'une métadonnée pour le tri et les préréglages. Réglez le débit directement pour des résultats prévisibles."
+      },
+      "infoBitrate": {
+        "title": "Débit (Mbps)",
+        "body1": "Le débit indique combien de données l'encodeur peut dépenser par seconde. Un Mbps plus élevé donne une image plus propre et moins d'artéfacts, mais consomme plus de bande passante. 4 Mbps convient au 720p, 8 Mbps au 1080p, 12 Mbps est la limite avant que le Pi Zero ne plafonne.",
+        "bodyEdgeCase": "Si vous voyez des pixels alors que la qualité est sur haut, le débit est trop bas pour la résolution et les FPS choisis. Augmentez le débit, pas la qualité."
+      },
       "saveCamera": "Enregistrer",
       "createCamera": "Créer la caméra",
       "deleteCamera": "Supprimer la caméra",

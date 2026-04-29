@@ -27,8 +27,20 @@ class HardwareAdapter(ABC):
         """Move camera tilt axis by delta."""
 
     @abstractmethod
-    async def set_ir_mode(self, mode: str) -> None:
-        """Set infrared mode to off/on/auto."""
+    async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
+        """Set infrared mode to off/on/auto.
+
+        strength (0..100) only applies when mode == "on". 'auto' lets the
+        lux-driven controller pick the level itself; 'off' ignores it.
+        """
+
+    @abstractmethod
+    async def set_ir_strength(self, strength: int) -> None:
+        """Live PWM-only adjustment without changing mode.
+
+        Used by the slider on the cameras page to dim the IR ring while in
+        'on' mode. A no-op if the adapter is not currently in 'on' mode.
+        """
 
     @abstractmethod
     async def set_recording(self, recording: bool) -> None:

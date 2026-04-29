@@ -41,6 +41,8 @@ def to_ingest_payload(
         "mode": state.mode,
         "irMode": state.ir_mode,
         "irEnabled": state.ir_enabled,
+        "irStrength": state.ir_strength,
+        "irActiveStrength": state.ir_active_strength,
         "pan": state.pan,
         "tilt": state.tilt,
         "temperatureC": state.temperature_c,

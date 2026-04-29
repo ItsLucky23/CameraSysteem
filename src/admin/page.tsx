@@ -8,6 +8,7 @@ import { useSyncEvents } from 'src/_sockets/syncRequest';
 import tryCatch from 'shared/tryCatch';
 
 import Chip from 'src/_components/ui/Chip';
+import InfoPopover from 'src/_components/InfoPopover';
 import MaterialIcon from 'src/_components/ui/MaterialIcon';
 import PageTopBar from 'src/_components/ui/PageTopBar';
 import StatusDot from 'src/_components/ui/StatusDot';
@@ -712,7 +713,7 @@ export default function AdminPage() {
                 </button>
               </div>
 
-              <div className="space-y-5 px-6 py-5">
+              <div className="max-h-[calc(100vh-220px)] space-y-5 overflow-y-auto px-6 py-5">
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldName' })}</label>
@@ -742,7 +743,18 @@ export default function AdminPage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.presetsLabel' })}</label>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.presetsLabel' })}</label>
+                    <InfoPopover
+                      title={translate({ key: 'aperture.admin.infoPresets.title' })}
+                      body={
+                        <>
+                          <p>{translate({ key: 'aperture.admin.infoPresets.body1' })}</p>
+                          <p>{translate({ key: 'aperture.admin.infoPresets.body2' })}</p>
+                        </>
+                      }
+                    />
+                  </div>
                   <div className="flex gap-1 rounded-[10px] bg-container2 p-1">
                     {STREAM_PRESETS.map((preset) => {
                       const active = activePresetId === preset.id;
@@ -762,7 +774,19 @@ export default function AdminPage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldResolution' })}</label>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldResolution' })}</label>
+                    <InfoPopover
+                      title={translate({ key: 'aperture.admin.infoResolution.title' })}
+                      body={
+                        <>
+                          <p>{translate({ key: 'aperture.admin.infoResolution.body1' })}</p>
+                          <p>{translate({ key: 'aperture.admin.infoResolution.body2' })}</p>
+                          <p>{translate({ key: 'aperture.admin.infoResolution.bodyWideLens' })}</p>
+                        </>
+                      }
+                    />
+                  </div>
                   <div className="flex gap-1 rounded-[10px] bg-container2 p-1">
                     {RESOLUTION_CHOICES.map((option) => {
                       const active = form.resolutionWidth === option.width && form.resolutionHeight === option.height;
@@ -782,7 +806,18 @@ export default function AdminPage() {
 
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldFps' })}</label>
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldFps' })}</label>
+                      <InfoPopover
+                        title={translate({ key: 'aperture.admin.infoFps.title' })}
+                        body={
+                          <>
+                            <p>{translate({ key: 'aperture.admin.infoFps.body1' })}</p>
+                            <p>{translate({ key: 'aperture.admin.infoFps.bodyEdgeCase' })}</p>
+                          </>
+                        }
+                      />
+                    </div>
                     <input
                       type="number"
                       min={0}
@@ -798,7 +833,13 @@ export default function AdminPage() {
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldQuality' })}</label>
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldQuality' })}</label>
+                      <InfoPopover
+                        title={translate({ key: 'aperture.admin.infoQuality.title' })}
+                        body={<p>{translate({ key: 'aperture.admin.infoQuality.body1' })}</p>}
+                      />
+                    </div>
                     <div className="flex gap-1 rounded-[10px] bg-container2 p-1">
                       {qualityChoices.map((q) => {
                         const active = form.quality === q;
@@ -818,7 +859,18 @@ export default function AdminPage() {
                 </div>
 
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldBitrateMbps' })}</label>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted">{translate({ key: 'aperture.admin.fieldBitrateMbps' })}</label>
+                    <InfoPopover
+                      title={translate({ key: 'aperture.admin.infoBitrate.title' })}
+                      body={
+                        <>
+                          <p>{translate({ key: 'aperture.admin.infoBitrate.body1' })}</p>
+                          <p>{translate({ key: 'aperture.admin.infoBitrate.bodyEdgeCase' })}</p>
+                        </>
+                      }
+                    />
+                  </div>
                   <input
                     type="number"
                     min={0.5}

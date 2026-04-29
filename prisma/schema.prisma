@@ -91,6 +91,7 @@ model Camera {
   mode         CAMERA_MODE @default(idle)
   irMode       IR_MODE   @default(auto)
   irEnabled    Boolean   @default(false)
+  irStrength   Int?      @default(100)
   pan          Int       @default(0)
   tilt         Int       @default(0)
   targetFps    Int       @default(15)

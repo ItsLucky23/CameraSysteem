@@ -16,6 +16,7 @@ export interface ApiParams {
   data: {
     cameraId: string;
     irMode: IRMode;
+    irStrength?: number | null;
   };
   user: SessionLayout;
   functions: Functions;
@@ -25,11 +26,20 @@ const isIRMode = (value: string): value is IRMode => {
   return value === 'off' || value === 'on' || value === 'auto';
 };
 
+const isValidStrength = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100;
+};
+
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
   const cameraId = data.cameraId.trim();
   const irModeValue = data.irMode.trim();
+  const irStrengthRaw = data.irStrength;
 
   if (!cameraId || !irModeValue || !isIRMode(irModeValue)) {
+    return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
+  }
+
+  if (irStrengthRaw !== undefined && irStrengthRaw !== null && !isValidStrength(irStrengthRaw)) {
     return { status: 'error', errorCode: 'camera.invalidInput', httpStatus: 400 };
   }
 
@@ -71,12 +81,24 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
 
   const irEnabled = irModeValue === 'on' ? true : (irModeValue === 'off' ? false : camera.irEnabled);
 
+  // Strength is only persisted when the user is in 'on' mode (or explicitly
+  // resets via null). 'auto' lets the controller pick the level so we leave
+  // the persisted value alone. Default to 100 when the existing row has null
+  // (legacy data before this field existed).
+  const persistStrength: number =
+    irModeValue === 'on' && isValidStrength(irStrengthRaw)
+      ? irStrengthRaw
+      : irStrengthRaw === null
+        ? 100
+        : (camera.irStrength ?? 100);
+
   const [cameraUpdateError, updatedCamera] = await tryCatch(async () => {
     return functions.db.prisma.camera.update({
       where: { id: cameraId },
       data: {
         irMode: irModeValue,
         irEnabled,
+        irStrength: persistStrength,
       },
     });
   });
@@ -86,50 +108,56 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   }
 
   // The DB update + sync broadcast above only flips client-visible state; the
-  // Pi Zero MOSFET gate (GPIO 18) won't actually change unless we enqueue an
-  // irOn/irOff command. 'auto' is a no-op on the adapter so we skip it.
-  if (irModeValue === 'on' || irModeValue === 'off') {
-    const action = irModeValue === 'on' ? 'irOn' : 'irOff';
-    const commandId = globalThis.crypto.randomUUID();
+  // Pi Zero MOSFET gate (GPIO 18) won't actually change unless we enqueue a
+  // command. 'auto' wakes up the lux-driven controller on the Pi Zero.
+  const actionMap: Record<IRMode, 'irOn' | 'irOff' | 'irAuto'> = {
+    on: 'irOn',
+    off: 'irOff',
+    auto: 'irAuto',
+  };
+  const action = actionMap[irModeValue];
+  const commandPayload: Record<string, unknown> =
+    irModeValue === 'on' ? { strength: updatedCamera.irStrength ?? 100 } : {};
 
+  const commandId = globalThis.crypto.randomUUID();
+
+  await tryCatch(async () => {
+    return functions.db.prisma.cameraCommand.create({
+      data: {
+        commandId,
+        cameraId,
+        userId: user.id,
+        action,
+        payloadJson: JSON.stringify(commandPayload),
+        status: 'accepted',
+        cooldownMs: 0,
+      },
+    });
+  });
+
+  const [dispatchError, dispatchResult] = await tryCatch(async () => {
+    return functions.cameraNode.enqueueCommand({
+      cameraIp: updatedCamera.ip,
+      cameraId,
+      commandId,
+      action,
+      payload: commandPayload,
+      requestedByUserId: user.id,
+    });
+  });
+
+  if (dispatchError || !dispatchResult?.queued) {
     await tryCatch(async () => {
-      return functions.db.prisma.cameraCommand.create({
+      return functions.db.prisma.cameraCommand.update({
+        where: { commandId },
         data: {
-          commandId,
-          cameraId,
-          userId: user.id,
-          action,
-          payloadJson: JSON.stringify({}),
-          status: 'accepted',
-          cooldownMs: 0,
+          status: 'failed',
+          rejectedReason: 'camera.nodeQueueFailed',
+          resolvedAt: new Date(),
         },
       });
     });
-
-    const [dispatchError, dispatchResult] = await tryCatch(async () => {
-      return functions.cameraNode.enqueueCommand({
-        cameraIp: updatedCamera.ip,
-        cameraId,
-        commandId,
-        action,
-        payload: {},
-        requestedByUserId: user.id,
-      });
-    });
-
-    if (dispatchError || !dispatchResult?.queued) {
-      await tryCatch(async () => {
-        return functions.db.prisma.cameraCommand.update({
-          where: { commandId },
-          data: {
-            status: 'failed',
-            rejectedReason: 'camera.nodeQueueFailed',
-            resolvedAt: new Date(),
-          },
-        });
-      });
-      return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 503 };
-    }
+    return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 503 };
   }
 
   await tryCatch(async () => {
@@ -170,6 +198,7 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       patch: {
         irMode: updatedCamera.irMode,
         irEnabled: updatedCamera.irEnabled,
+        irStrength: updatedCamera.irStrength,
       },
       at: new Date().toISOString(),
     },
@@ -179,5 +208,6 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     status: 'success',
     cameraId,
     irMode: updatedCamera.irMode,
+    irStrength: updatedCamera.irStrength,
   };
 };

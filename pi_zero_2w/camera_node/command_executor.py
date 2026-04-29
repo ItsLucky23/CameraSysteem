@@ -40,9 +40,29 @@ class CommandExecutor:
             elif command.action == "tiltDown":
                 await self._adapter.tilt(-self._ptz_step)
             elif command.action == "irOn":
-                await self._adapter.set_ir_mode("on")
+                strength = _parse_strength(command.payload, default_when_missing=100)
+                if strength is None:
+                    return CommandResult(
+                        command_id=command.command_id,
+                        action=command.action,
+                        result="rejected",
+                        reason_code="camera.invalidInput",
+                    )
+                await self._adapter.set_ir_mode("on", strength=strength)
             elif command.action == "irOff":
                 await self._adapter.set_ir_mode("off")
+            elif command.action == "irAuto":
+                await self._adapter.set_ir_mode("auto")
+            elif command.action == "irSetStrength":
+                strength = _parse_strength(command.payload, default_when_missing=None)
+                if strength is None:
+                    return CommandResult(
+                        command_id=command.command_id,
+                        action=command.action,
+                        result="rejected",
+                        reason_code="camera.invalidInput",
+                    )
+                await self._adapter.set_ir_strength(strength)
             elif command.action == "recordStart":
                 await self._adapter.set_recording(True)
             elif command.action == "recordStop":
@@ -161,3 +181,19 @@ def _validate_start_video_stream(
         height = height_raw
 
     return rtp_host, rtp_port_raw, target_fps_raw, bitrate_bps_raw, width, height
+
+
+def _parse_strength(payload: dict[str, Any], *, default_when_missing: int | None) -> int | None:
+    # irOn allows the strength to be omitted (caller supplies default 100).
+    # irSetStrength requires it explicitly (caller passes None as default).
+    # Both reject any non-int / out-of-range value.
+    raw = payload.get("strength")
+    if raw is None:
+        return default_when_missing
+    if isinstance(raw, bool):
+        return None
+    if not isinstance(raw, int):
+        return None
+    if raw < 0 or raw > 100:
+        return None
+    return raw

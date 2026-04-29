@@ -94,6 +94,7 @@
       "irOff": "Aus",
       "irAuto": "Auto",
       "irOn": "An",
+      "irStrength": "Stärke",
       "fps": "FPS",
       "quality": "Qualität",
       "qualityLow": "Niedrig",
@@ -165,6 +166,31 @@
       "presetFpsOpt": "FPS-optimiert",
       "presetQualityOpt": "Qualitätsoptimiert",
       "presetBestOfBoth": "Beste aus beidem",
+      "infoPresets": {
+        "title": "Stream-Voreinstellungen",
+        "body1": "Jede Voreinstellung ist eine abgestimmte Kombination aus Auflösung, FPS, Bitrate und Qualität. FPS-optimiert bevorzugt flüssige Bewegung, Qualitätsoptimiert bevorzugt Details, Beste aus beidem ist ein ausgewogener Mittelweg.",
+        "body2": "Wähle eine Voreinstellung als Ausgangspunkt und passe danach die einzelnen Felder an. Der Pi-Zero-Stream startet innerhalb von etwa 10 Sekunden nach dem Speichern neu."
+      },
+      "infoResolution": {
+        "title": "Auflösung",
+        "body1": "Höhere Auflösung bedeutet mehr Detail pro Bild, kostet aber mehr Bandbreite und CPU. 1920x1080 ist das Maximum, das der H.264-Encoder des Pi Zero 2W bei niedriger FPS aushält. 1280x720 ist der ideale Kompromiss für hohe Bildraten. 854x480 und 640x480 sind besser, wenn das Netz limitiert ist oder die Kamera einen kleinen Bereich abdeckt.",
+        "body2": "Eine verdoppelte Auflösung erfordert grob eine verdoppelte Bitrate. Wirkt der Stream nach einer Erhöhung blockig, erhöhe auch die Bitrate.",
+        "bodyWideLens": "Deine Kamera ist die IMX708 Wide Pi Camera 3 (~102 Grad Bildwinkel). Der breitere Bildwinkel zeigt mehr Szene pro Bild, mit leicht weicheren Rändern. Höhere Auflösung erhält Details pro Objekt über das größere Sichtfeld, also lohnt 1080p auf einem Weitwinkel mehr als auf einer Standardlinse."
+      },
+      "infoFps": {
+        "title": "Bildrate",
+        "body1": "FPS steuert die Bewegungsglätte. 25 FPS wirkt cinematic, 50-60 FPS wirkt live. Der H.264-Encoder des Pi Zero 2W liegt bei 1920x1080 um die 28 FPS, also musst du für höhere Bildraten auf 1280x720 oder darunter herunterstufen.",
+        "bodyEdgeCase": "Friert der Stream bei hoher FPS für einige Sekunden ein, ist der Encoder kurz überlastet. Senke FPS oder Bitrate, oder wähle eine geringere Auflösung."
+      },
+      "infoQuality": {
+        "title": "Qualitäts-Etikett",
+        "body1": "Qualität ist ein Etikett, das eine Standard-Bitrate auswählt, wenn du keine explizit setzt. Sobald du eine Bitrate setzt, ist Qualität nur noch Metadaten für Sortierung und Voreinstellungen. Setze die Bitrate direkt für vorhersehbare Ergebnisse."
+      },
+      "infoBitrate": {
+        "title": "Bitrate (Mbps)",
+        "body1": "Die Bitrate gibt an, wie viele Daten der Encoder pro Sekunde verbrauchen darf. Höhere Mbps bedeuten saubereres Bild und weniger Kompressionsartefakte, aber mehr Bandbreite. 4 Mbps ist komfortabel für 720p, 8 Mbps für 1080p, 12 Mbps ist die Obergrenze, bevor der Pi Zero auf abnehmenden Ertrag stößt.",
+        "bodyEdgeCase": "Pixelt es, obwohl die Qualität auf Hoch steht, ist die Bitrate für die gewählte Auflösung und FPS zu niedrig. Erhöhe die Bitrate, nicht die Qualität."
+      },
       "saveCamera": "Speichern",
       "createCamera": "Kamera anlegen",
       "deleteCamera": "Kamera entfernen",

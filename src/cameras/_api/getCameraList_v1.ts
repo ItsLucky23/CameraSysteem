@@ -65,6 +65,7 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         isOnline: boolean;
         mode: 'off' | 'idle' | 'live' | 'record';
         irMode: 'off' | 'on' | 'auto';
+        irStrength: number | null;
         targetFps: number;
         quality: 'low' | 'medium' | 'high';
         lastSeenAt: Date | null;
@@ -75,6 +76,7 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         isOnline: camera.isOnline,
         mode: camera.mode,
         irMode: camera.irMode,
+        irStrength: camera.irStrength ?? 100,
         targetFps: camera.targetFps,
         quality: camera.quality,
         canPreview: true,
@@ -120,6 +122,7 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
         isOnline: boolean;
         mode: 'off' | 'idle' | 'live' | 'record';
         irMode: 'off' | 'on' | 'auto';
+        irStrength: number | null;
         targetFps: number;
         quality: 'low' | 'medium' | 'high';
         lastSeenAt: Date | null;
@@ -131,6 +134,7 @@ export const main = async ({ user, functions }: ApiParams): Promise<ApiResponse>
       isOnline: accessRow.camera.isOnline,
       mode: accessRow.camera.mode,
       irMode: accessRow.camera.irMode,
+      irStrength: accessRow.camera.irStrength ?? 100,
       targetFps: accessRow.camera.targetFps,
       quality: accessRow.camera.quality,
       canPreview: accessRow.canPreview,
