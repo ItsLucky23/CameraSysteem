@@ -85,6 +85,53 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'error', errorCode: 'camera.commandFailed', httpStatus: 500 };
   }
 
+  // The DB update + sync broadcast above only flips client-visible state; the
+  // Pi Zero MOSFET gate (GPIO 18) won't actually change unless we enqueue an
+  // irOn/irOff command. 'auto' is a no-op on the adapter so we skip it.
+  if (irModeValue === 'on' || irModeValue === 'off') {
+    const action = irModeValue === 'on' ? 'irOn' : 'irOff';
+    const commandId = globalThis.crypto.randomUUID();
+
+    await tryCatch(async () => {
+      return functions.db.prisma.cameraCommand.create({
+        data: {
+          commandId,
+          cameraId,
+          userId: user.id,
+          action,
+          payloadJson: JSON.stringify({}),
+          status: 'accepted',
+          cooldownMs: 0,
+        },
+      });
+    });
+
+    const [dispatchError, dispatchResult] = await tryCatch(async () => {
+      return functions.cameraNode.enqueueCommand({
+        cameraIp: updatedCamera.ip,
+        cameraId,
+        commandId,
+        action,
+        payload: {},
+        requestedByUserId: user.id,
+      });
+    });
+
+    if (dispatchError || !dispatchResult?.queued) {
+      await tryCatch(async () => {
+        return functions.db.prisma.cameraCommand.update({
+          where: { commandId },
+          data: {
+            status: 'failed',
+            rejectedReason: 'camera.nodeQueueFailed',
+            resolvedAt: new Date(),
+          },
+        });
+      });
+      return { status: 'error', errorCode: 'camera.nodeQueueFailed', httpStatus: 503 };
+    }
+  }
+
   await tryCatch(async () => {
     return functions.db.prisma.cameraStateSnapshot.create({
       data: {

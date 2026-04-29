@@ -36,11 +36,18 @@ class CameraNodeRuntime:
         self._last_telemetry_at = 0.0
         self._capabilities: CapabilityReport | None = None
         self._thumbnail_publisher: ThumbnailPublisher | None = None
+        self._tasks: list[asyncio.Task[None]] = []
 
     def request_stop(self) -> None:
         self._running = False
         if self._thumbnail_publisher is not None:
             self._thumbnail_publisher.request_stop()
+        # Without this, an in-flight 25s command long-poll or 5s telemetry
+        # sleep keeps the loop blocked until it naturally returns. Cancelling
+        # the tasks wakes them immediately so shutdown finishes in <1s.
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
 
     async def run(self) -> None:
         logger.info("Starting camera node runtime for camera IP %s", self._settings.camera_ip)
@@ -95,13 +102,18 @@ class CameraNodeRuntime:
                 # so command and telemetry loops have to run in parallel — a
                 # single sequential loop would either starve telemetry (if it
                 # waits for commands) or burn cycles (if it polls).
-                command_task = asyncio.create_task(self._command_loop())
-                telemetry_task = asyncio.create_task(self._telemetry_loop())
-                thumbnail_task = asyncio.create_task(self._thumbnail_publisher.run())
+                self._tasks = [
+                    asyncio.create_task(self._command_loop()),
+                    asyncio.create_task(self._telemetry_loop()),
+                    asyncio.create_task(self._thumbnail_publisher.run()),
+                ]
 
+                # FIRST_COMPLETED (not FIRST_EXCEPTION) so a graceful task exit
+                # via cancellation also wakes the wait — request_stop() relies
+                # on this to unblock fast on Ctrl+C.
                 done, pending = await asyncio.wait(
-                    {command_task, telemetry_task, thumbnail_task},
-                    return_when=asyncio.FIRST_EXCEPTION,
+                    set(self._tasks),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
 
                 for task in pending:
@@ -111,8 +123,10 @@ class CameraNodeRuntime:
                         await task
                     except asyncio.CancelledError:
                         pass
-                # Surface any exception from a finished task.
+                # Surface any non-cancellation exception from a finished task.
                 for task in done:
+                    if task.cancelled():
+                        continue
                     task.result()
         finally:
             await self._adapter.shutdown()
@@ -128,6 +142,8 @@ class CameraNodeRuntime:
                     long_poll_ms=self._settings.long_poll_ms,
                     request_timeout_sec=self._settings.long_poll_request_timeout_sec,
                 )
+            except asyncio.CancelledError:
+                return
             except Pi5ApiError as error:
                 logger.warning(
                     "Failed to poll commands: %s (code=%s, status=%s)",
@@ -166,7 +182,10 @@ class CameraNodeRuntime:
         # from the command loop right after execute().
         interval_sec = max(1.0, self._settings.telemetry_interval_sec)
         while self._running:
-            await asyncio.sleep(interval_sec)
+            try:
+                await asyncio.sleep(interval_sec)
+            except asyncio.CancelledError:
+                return
             if not self._running:
                 return
             if not self._telemetry_due():
