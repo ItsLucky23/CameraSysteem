@@ -56,10 +56,16 @@ class CommandExecutor:
                         result="rejected",
                         reason_code="camera.invalidInput",
                     )
+                if is_log_enabled("ir"):
+                    logger.info("[ir] cmd=irOn strength=%s requestedBy=%s", strength, command.requested_by_user_id)
                 await self._adapter.set_ir_mode("on", strength=strength)
             elif command.action == "irOff":
+                if is_log_enabled("ir"):
+                    logger.info("[ir] cmd=irOff requestedBy=%s", command.requested_by_user_id)
                 await self._adapter.set_ir_mode("off")
             elif command.action == "irAuto":
+                if is_log_enabled("ir"):
+                    logger.info("[ir] cmd=irAuto requestedBy=%s", command.requested_by_user_id)
                 await self._adapter.set_ir_mode("auto")
             elif command.action == "irSetStrength":
                 strength = _parse_strength(command.payload, default_when_missing=None)
@@ -70,6 +76,8 @@ class CommandExecutor:
                         result="rejected",
                         reason_code="camera.invalidInput",
                     )
+                if is_log_enabled("ir"):
+                    logger.info("[ir] cmd=irSetStrength strength=%s requestedBy=%s", strength, command.requested_by_user_id)
                 await self._adapter.set_ir_strength(strength)
             elif command.action == "recordStart":
                 await self._adapter.set_recording(True)

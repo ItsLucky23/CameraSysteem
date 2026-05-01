@@ -254,14 +254,24 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         clamped = _clamp(strength, 0, 100)
         if is_log_enabled("ir"):
             logger.info("[ir] set_ir_strength input=%s clamped=%s mode=%s", strength, clamped, self._state.ir_mode)
-        self._ir_strength = clamped
-        self._state.ir_strength = self._ir_strength
-        # Applied immediately in 'on' mode (manual slider) and in 'auto' mode
-        # (Pi 5 controller). 'off' ignores the new value — user explicitly
-        # disabled IR.
-        if self._state.ir_mode in ("on", "auto"):
-            self._apply_ir_pwm(self._ir_strength)
-            self._state.ir_enabled = self._ir_strength > 0
+        if self._state.ir_mode == "on":
+            # User slider drag: this is the operator's persisted manual value.
+            self._ir_strength = clamped
+            self._state.ir_strength = self._ir_strength
+            self._apply_ir_pwm(clamped)
+            self._state.ir_enabled = clamped > 0
+            return
+        if self._state.ir_mode == "auto":
+            # Pi 5 auto controller drove this — apply to the LED but do NOT
+            # touch self._ir_strength (that holds the operator's last manual
+            # value, restored when the user flips Auto -> On).
+            self._apply_ir_pwm(clamped)
+            self._state.ir_enabled = clamped > 0
+            return
+        # mode == "off": user explicitly disabled IR; ignore stray strength
+        # commands so an in-flight auto-IR write can't relight the LED.
+        if is_log_enabled("ir"):
+            logger.info("[ir] set_ir_strength ignored — mode=off")
 
     def _apply_ir_pwm(self, strength: int) -> None:
         clamped = _clamp(strength, 0, 100)

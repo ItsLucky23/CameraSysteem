@@ -88,10 +88,17 @@ class MockHardwareAdapter(HardwareAdapter):
 
     async def set_ir_strength(self, strength: int) -> None:
         await asyncio.sleep(0)
-        self._state.ir_strength = _clamp(strength, 0, 100)
+        clamped = _clamp(strength, 0, 100)
         if self._state.ir_mode == "on":
-            self._state.ir_active_strength = self._state.ir_strength
-            self._state.ir_enabled = self._state.ir_strength > 0
+            self._state.ir_strength = clamped
+            self._state.ir_active_strength = clamped
+            self._state.ir_enabled = clamped > 0
+            return
+        if self._state.ir_mode == "auto":
+            self._state.ir_active_strength = clamped
+            self._state.ir_enabled = clamped > 0
+            return
+        # mode == "off": ignore stray strength commands
 
     async def set_recording(self, recording: bool) -> None:
         await asyncio.sleep(0)

@@ -70,36 +70,69 @@ export const onThumbnailUpdated = async ({
   cameraId: string;
   jpegBase64: string;
 }): Promise<void> => {
+  const logEnabled = isCameraLogEnabled(cameraId, 'ir');
+
   const [cameraReadError, camera] = await tryCatch(async () => {
     return prisma.camera.findUnique({
       where: { id: cameraId },
       select: { id: true, ip: true, irMode: true, irStrength: true },
     });
   });
-  if (cameraReadError || !camera) return;
+  if (cameraReadError) {
+    if (logEnabled) {
+      console.log(`[ir] cameraId=${cameraId} thumbnail tick — skip: db read error`);
+    }
+    return;
+  }
+  if (!camera) {
+    if (logEnabled) {
+      console.log(`[ir] cameraId=${cameraId} thumbnail tick — skip: camera not in db`);
+    }
+    return;
+  }
 
-  // Only auto mode drives the LED. 'on' is user-controlled, 'off' means IR
-  // explicitly disabled. Either way we reset our hysteresis state so the next
-  // switch back to auto starts fresh.
+  // 'on' is a constant user-set value applied by setIRStrength_v1 + the Pi
+  // Zero adapter. 'off' explicitly disables IR. The auto controller is the
+  // ONLY thing that should drive irSetStrength here — and only when
+  // irMode === 'auto'. Reset hysteresis state so the next switch into auto
+  // starts fresh.
   if (camera.irMode !== 'auto') {
-    stateByCamera.delete(cameraId);
+    if (stateByCamera.has(cameraId)) {
+      stateByCamera.delete(cameraId);
+    }
+    if (logEnabled) {
+      console.log(
+        `[ir] cameraId=${cameraId} thumbnail tick — skip: mode=${camera.irMode} (auto controller is dormant; manual strength=${String(camera.irStrength ?? 100)}%)`,
+      );
+    }
     return;
   }
 
   const meanY = await computeMeanLuma(jpegBase64);
-  if (meanY === null) return;
+  if (meanY === null) {
+    if (logEnabled) {
+      console.log(`[ir] cameraId=${cameraId} thumbnail tick — skip: meanY decode failed`);
+    }
+    return;
+  }
 
   const target = computeTargetStrength(meanY);
   const state = stateByCamera.get(cameraId) ?? { lastAppliedStrength: -1, zeroStreak: 0 };
+
+  if (logEnabled) {
+    console.log(
+      `[ir] cameraId=${cameraId} mode=auto meanY=${meanY.toFixed(1)} thresholds=[${DARK_THRESHOLD}..${BRIGHT_THRESHOLD}] computedTarget=${target}% lastApplied=${state.lastAppliedStrength}% zeroStreak=${state.zeroStreak}`,
+    );
+  }
 
   let toApply: number;
   if (target === 0 && state.lastAppliedStrength > 0) {
     state.zeroStreak += 1;
     if (state.zeroStreak < OFF_HYSTERESIS_SAMPLES) {
       stateByCamera.set(cameraId, state);
-      if (isCameraLogEnabled(cameraId, 'ir')) {
+      if (logEnabled) {
         console.log(
-          `[ir-auto] cameraId=${cameraId} meanY=${meanY.toFixed(1)} target=0 holdingOff streak=${state.zeroStreak}/${OFF_HYSTERESIS_SAMPLES} (last=${state.lastAppliedStrength}%)`,
+          `[ir] cameraId=${cameraId} mode=auto holdingOff streak=${state.zeroStreak}/${OFF_HYSTERESIS_SAMPLES} (waiting one more dark→bright sample before dropping LED to 0)`,
         );
       }
       return;
@@ -113,32 +146,24 @@ export const onThumbnailUpdated = async ({
   const previous = state.lastAppliedStrength;
   if (previous >= 0 && Math.abs(previous - toApply) < MIN_DELTA_TO_APPLY) {
     stateByCamera.set(cameraId, state);
-    if (isCameraLogEnabled(cameraId, 'ir')) {
+    if (logEnabled) {
       console.log(
-        `[ir-auto] cameraId=${cameraId} meanY=${meanY.toFixed(1)} target=${toApply}% deltaSkip (previous=${previous}%)`,
+        `[ir] cameraId=${cameraId} mode=auto deltaSkip target=${toApply}% previous=${previous}% (|delta|<${MIN_DELTA_TO_APPLY})`,
       );
     }
     return;
   }
 
-  if (isCameraLogEnabled(cameraId, 'ir')) {
+  if (logEnabled) {
     console.log(
-      `[ir-auto] cameraId=${cameraId} meanY=${meanY.toFixed(1)} thresholds=[${DARK_THRESHOLD}..${BRIGHT_THRESHOLD}] target=${toApply}% previous=${previous}% applying`,
+      `[ir] cameraId=${cameraId} mode=auto APPLY target=${toApply}% previous=${previous}% — enqueuing irSetStrength`,
     );
   }
 
-  // Persist the new value so the next page load + the cameras list reflect it.
-  await tryCatch(async () => {
-    return prisma.camera.update({
-      where: { id: cameraId },
-      data: { irStrength: toApply },
-    });
-  });
-
-  // Push to the Pi Zero via the existing irSetStrength command path. We do
-  // NOT write a cameraCommand row for these — they're high-frequency and
-  // would clutter the audit log. The slider commits go through
-  // setIRStrength_v1 which does write rows (those are user-initiated).
+  // Auto-driven strength is intentionally NOT persisted into Camera.irStrength.
+  // That column is reserved for the user's manual 'on' value so flipping
+  // Auto → On returns to whatever the operator last picked, not whatever the
+  // auto loop last drove.
   const commandId = globalThis.crypto.randomUUID();
   await tryCatch(async () => {
     return enqueueCommand({

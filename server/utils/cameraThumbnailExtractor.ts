@@ -19,7 +19,19 @@ import { subscribeRtp } from './cameraWebrtcBridge';
 // every THUMBNAIL_INTERVAL_SEC. Each frame is stored via setThumbnail and
 // broadcast on the cameras-overview + per-camera rooms.
 
-const THUMBNAIL_INTERVAL_SEC = 30;
+// Tick cadence. Drives both thumbnail broadcast frequency AND the auto-IR
+// controller's re-evaluation interval (the controller is invoked from
+// handleJpegFrame). 30 in prod; drop to 1 during dev to make auto-IR react
+// in near-real-time. Clamped to [1, 600] so a typo in .env can't disable
+// the extractor or DoS the broadcast room.
+const parseThumbnailIntervalSec = (): number => {
+  const raw = process.env.CAMERA_THUMBNAIL_INTERVAL_SEC;
+  if (!raw) return 30;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return 30;
+  return Math.max(1, Math.min(600, parsed));
+};
+const THUMBNAIL_INTERVAL_SEC = parseThumbnailIntervalSec();
 const THUMBNAIL_WIDTH = 1280;
 const THUMBNAIL_HEIGHT = 720;
 const JPEG_QUALITY = 5; // ffmpeg -q:v scale (lower = better; 5 ~ high quality)
@@ -64,8 +76,9 @@ const handleJpegFrame = (cameraId: string, jpegBytes: Buffer): void => {
   setThumbnail(cameraId, jpegBase64, capturedAt);
 
   // Drive the auto-IR controller off the same JPEGs we already produce here.
-  // Cadence is THUMBNAIL_INTERVAL_SEC (30s by default) — drop that constant
-  // for snappier auto-IR reaction at the cost of more sync broadcasts.
+  // Cadence is CAMERA_THUMBNAIL_INTERVAL_SEC (env, default 30s) — set to 1
+  // during dev for snappy auto-IR verification at the cost of louder sync
+  // broadcasts.
   void onThumbnailUpdated({ cameraId, jpegBase64 });
 
   const capturedAtIso = capturedAt.toISOString();
@@ -268,7 +281,9 @@ const start = async (cameraId: string): Promise<void> => {
   });
 
   state.extractors.set(cameraId, extractor);
-  console.log(`[thumbnail-extractor] start cameraId=${cameraId} loopbackPort=${String(loopbackPort)}`);
+  console.log(
+    `[thumbnail-extractor] start cameraId=${cameraId} loopbackPort=${String(loopbackPort)} intervalSec=${String(THUMBNAIL_INTERVAL_SEC)}`,
+  );
 };
 
 const stop = async (cameraId: string): Promise<void> => {

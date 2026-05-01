@@ -2,6 +2,9 @@ import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { tryCatch } from '../../../server/functions/tryCatch';
 import { canControlCamera, emitCameraSyncEvent, getCameraRoomCode } from '../../../server/utils/cameraHelpers';
+import { isCameraLogEnabled } from '../../../server/utils/cameraLogFlagStore';
+import { onThumbnailUpdated } from '../../../server/utils/cameraIRController';
+import { getThumbnail } from '../../../server/utils/cameraThumbnailStore';
 
 export const rateLimit: number | false = 60;
 
@@ -47,6 +50,12 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   console.log(
     `[action] cameras/setIRMode cameraId=${cameraId} userId=${user.id} mode=${irModeValue}`,
   );
+
+  if (isCameraLogEnabled(cameraId, 'ir')) {
+    console.log(
+      `[ir] cameras/setIRMode cameraId=${cameraId} mode=${irModeValue} requestedStrength=${String(irStrengthRaw ?? 'unchanged')}`,
+    );
+  }
 
   const [cameraFetchError, cameraFetchResult] = await tryCatch(async () => {
     return Promise.all([
@@ -205,6 +214,23 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
       at: new Date().toISOString(),
     },
   });
+
+  // Switching INTO auto: don't make the user wait for the next thumbnail
+  // tick (up to CAMERA_THUMBNAIL_INTERVAL_SEC seconds away). Fire an
+  // immediate evaluation off the most recent cached frame so the LED
+  // settles to the lux-derived target right after the mode flip. The
+  // controller's own gate re-checks irMode from the DB, so this is safe
+  // even if the user flips back to off/on before this resolves.
+  if (irModeValue === 'auto') {
+    const cached = getThumbnail(cameraId);
+    if (cached) {
+      void onThumbnailUpdated({ cameraId, jpegBase64: cached.jpegBase64 });
+    } else if (isCameraLogEnabled(cameraId, 'ir')) {
+      console.log(
+        `[ir] cameras/setIRMode cameraId=${cameraId} mode=auto — no cached thumbnail yet, waiting for next extractor tick`,
+      );
+    }
+  }
 
   return {
     status: 'success',
