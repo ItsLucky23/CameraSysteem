@@ -60,6 +60,7 @@ class NodeSettings:
     long_poll_ms: int
     long_poll_request_timeout_sec: float
     telemetry_interval_sec: float
+    thumbnail_interval_sec: float
     command_batch_limit: int
     http_timeout_sec: float
     verify_tls: bool
@@ -122,6 +123,11 @@ def load_settings() -> NodeSettings:
         long_poll_ms=max(1000, _parse_int(os.getenv("LONG_POLL_MS"), 25000)),
         long_poll_request_timeout_sec=max(2.0, _parse_float(os.getenv("LONG_POLL_REQUEST_TIMEOUT_SEC"), 35.0)),
         telemetry_interval_sec=max(1.0, _parse_float(os.getenv("TELEMETRY_INTERVAL_SEC"), 5.0)),
+        # Cadence for the Pi Zero's rpicam-jpeg fallback thumbnail loop. Only
+        # active when no RTP stream is running (otherwise the Pi 5 extractor
+        # takes over). Drop to 1.0 in dev to get snappy auto-IR feedback even
+        # without a viewer connected. Clamped to [1, 600].
+        thumbnail_interval_sec=max(1.0, min(600.0, _parse_float(os.getenv("THUMBNAIL_INTERVAL_SEC"), 30.0))),
         command_batch_limit=max(1, min(100, _parse_int(os.getenv("COMMAND_BATCH_LIMIT"), 20))),
         http_timeout_sec=max(1.0, _parse_float(os.getenv("HTTP_TIMEOUT_SEC"), 8.0)),
         verify_tls=_parse_bool(os.getenv("VERIFY_TLS"), True),

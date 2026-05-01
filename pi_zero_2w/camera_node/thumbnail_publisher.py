@@ -11,7 +11,7 @@ from camera_node.api_client import Pi5ApiClient, Pi5ApiError
 logger = logging.getLogger(__name__)
 
 
-THUMBNAIL_INTERVAL_SEC = 30.0
+DEFAULT_THUMBNAIL_INTERVAL_SEC = 30.0
 THUMBNAIL_CAPTURE_TIMEOUT_SEC = 5.0
 THUMBNAIL_WIDTH = 1280
 THUMBNAIL_HEIGHT = 720
@@ -21,7 +21,8 @@ RPICAM_TIMEOUT_MS = 200
 
 class ThumbnailPublisher:
     """
-    Captures a JPEG every 30s with rpicam-jpeg and POSTs it to the Pi 5.
+    Captures a JPEG every interval_sec seconds with rpicam-jpeg and POSTs it
+    to the Pi 5.
 
     Always attempts capture. When the video pipeline is active rpicam-jpeg will
     fail to grab the sensor; in that case the Pi 5 takes over thumbnail
@@ -35,10 +36,12 @@ class ThumbnailPublisher:
         api_client: Pi5ApiClient,
         camera_ip: str,
         node_secret: str,
+        interval_sec: float = DEFAULT_THUMBNAIL_INTERVAL_SEC,
     ) -> None:
         self._api_client = api_client
         self._camera_ip = camera_ip
         self._node_secret = node_secret
+        self._interval_sec = max(1.0, min(600.0, float(interval_sec)))
         self._cached_camera_id: str | None = None
         self._running = True
         # Tracks whether the last capture attempt failed because the sensor is
@@ -64,7 +67,7 @@ class ThumbnailPublisher:
 
         while self._running:
             try:
-                await asyncio.sleep(THUMBNAIL_INTERVAL_SEC)
+                await asyncio.sleep(self._interval_sec)
             except asyncio.CancelledError:
                 return
 

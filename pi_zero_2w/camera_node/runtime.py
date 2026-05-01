@@ -96,6 +96,7 @@ class CameraNodeRuntime:
                     api_client=self._api_client,
                     camera_ip=self._settings.camera_ip,
                     node_secret=self._settings.node_secret,
+                    interval_sec=self._settings.thumbnail_interval_sec,
                 )
 
                 # Long-polling on commands can hold the request open up to 25s,
