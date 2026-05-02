@@ -9,7 +9,9 @@
       "Bash(python *)",
       "Bash(npx eslint *)",
       "Bash(npm run *)",
-      "Bash(echo \"EXIT=$?\")"
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(Get-ChildItem -Path \"E:\\\\code\\\\CameraSysteem\" -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }

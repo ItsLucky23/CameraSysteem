@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import shlex
 import time
@@ -53,6 +54,14 @@ class VideoPublisher:
         self._self_heal_in_progress: bool = False
         self._v4l2_failure_count: int = 0
         self._last_v4l2_failure_at: float = 0.0
+        # Retry cap: IMX708/libcamera sometimes negotiates a pixel format the
+        # V4L2 buffer queue rejects on first cold boot. 1-3 self-heals usually
+        # converge to a working format. If we blow past 5 retries inside 60s,
+        # the sensor likely needs hardware attention (cable, supply, kernel)
+        # and looping forever just hides the problem. Stop and let the Pi 5
+        # reconciler's first-packet timeout re-issue startVideoStream later.
+        self._self_heal_attempts: list[float] = []
+        self._self_heal_giving_up_logged: bool = False
 
     async def start(
         self,
@@ -143,6 +152,8 @@ class VideoPublisher:
         # restart doesn't inherit stale failure counters from the prior run.
         self._v4l2_failure_count = 0
         self._last_v4l2_failure_at = 0.0
+        self._self_heal_attempts = []
+        self._self_heal_giving_up_logged = False
 
         # Drain stderr in the background so the pipe does not fill and deadlock the pipeline.
         asyncio.create_task(self._drain_stderr(self._process))
@@ -182,7 +193,11 @@ class VideoPublisher:
             return
 
         try:
-            await asyncio.wait_for(process.wait(), timeout=3.0)
+            # 1s instead of 3s: rpicam-vid in the V4L2-stuck state ignores
+            # SIGTERM cleanly because it's busy spinning on buffer-queue
+            # errors, so waiting longer just delays the SIGKILL we end up
+            # sending anyway. Shrinks the self-heal cycle from ~5s to ~2s.
+            await asyncio.wait_for(process.wait(), timeout=1.0)
         except asyncio.TimeoutError:
             try:
                 process.kill()
@@ -455,8 +470,10 @@ class VideoPublisher:
         self._last_v4l2_failure_at = now
         self._v4l2_failure_count += 1
 
-        # Three failures inside the window = real loop, not a transient.
-        if self._v4l2_failure_count < 3:
+        # Two failures inside the window = real loop. Was 3, but the typical
+        # V4L2-stuck pattern emits ~6 failures in <100ms so 2 is plenty of
+        # signal and shaves a second or two off the recovery cycle.
+        if self._v4l2_failure_count < 2:
             return
 
         if self._self_heal_in_progress:
@@ -464,10 +481,35 @@ class VideoPublisher:
         if self._self_heal_task is not None and not self._self_heal_task.done():
             return
 
+        # Retry cap: max 5 self-heals inside a 60s window. Drop entries older
+        # than the window first so long-running healthy sessions don't carry
+        # ancient attempts forward.
+        self._self_heal_attempts = [
+            t for t in self._self_heal_attempts if now - t < 60.0
+        ]
+        if len(self._self_heal_attempts) >= 5:
+            if not self._self_heal_giving_up_logged:
+                logger.warning(
+                    "VideoPublisher self-heal: giving up after %d attempts in "
+                    "60s — sensor likely needs hardware attention. Pi 5 "
+                    "reconciler will re-issue startVideoStream.",
+                    len(self._self_heal_attempts),
+                )
+                self._self_heal_giving_up_logged = True
+                # Kill the stuck pipeline so the Pi 5 sees RTP silence and the
+                # first-packet timeout fires. Without this we'd keep spinning
+                # on V4L2 errors forever.
+                if self._process is not None:
+                    with contextlib.suppress(Exception):
+                        self._process.kill()
+            return
+        self._self_heal_attempts.append(now)
+
         self._v4l2_failure_count = 0
         logger.warning(
             "VideoPublisher self-heal: V4L2 failure loop detected, "
-            "restarting pipeline (last line: %s)",
+            "restarting pipeline (attempt %d/5, last line: %s)",
+            len(self._self_heal_attempts),
             text,
         )
         self._self_heal_task = asyncio.create_task(self._restart_pipeline())

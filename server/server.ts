@@ -115,8 +115,9 @@ const ServerRequest = async (req: http.IncomingMessage, res: http.ServerResponse
 
   //? we log the request and if there are any params we log them with the request
   if (params && typeof params == 'object' && Object.keys(params).length !== 0) {
-    const safeParams = sanitizeForLog(params);
-    console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
+    // const safeParams = sanitizeForLog(params);
+    // console.log(`method: ${method}, url: ${routePath}, params: ${JSON.stringify(safeParams)}`, 'magenta')
+    console.log(`method: ${method}, url: ${routePath}`, 'magenta')
   } else {
     console.log(`method: ${method}, url: ${routePath}`, 'magenta');
     params = {};

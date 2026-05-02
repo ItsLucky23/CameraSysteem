@@ -42,6 +42,12 @@ interface OrchestratorSingletonState {
   // Pi Zero command queue, which extends the gap further and causes another
   // kick on the next tick — runaway feedback loop.
   lastKickAtByCameraId: Map<string, number>;
+  // Per-camera timestamp of the most recent activation (or kick). Used by the
+  // reconciler to detect "Pi Zero received startVideoStream but never produced
+  // a single RTP packet" — without this, lastPacketAt stays null forever and
+  // the reconciler never re-issues startVideoStream, leaving the orchestrator
+  // permanently stuck after a Pi Zero crash on its first cold start.
+  activatedAtByCameraId: Map<string, number>;
 }
 
 const ORCHESTRATOR_SINGLETON_KEY = '__luckyStackCameraStreamOrchestratorState__';
@@ -58,6 +64,7 @@ const orchestratorState: OrchestratorSingletonState = orchestratorScope[ORCHESTR
   pendingDeactivationTimer: null,
   recordingReservations: new Set<string>(),
   lastKickAtByCameraId: new Map<string, number>(),
+  activatedAtByCameraId: new Map<string, number>(),
 };
 
 // Backfill on HMR: an existing singleton from before these fields were added
@@ -67,6 +74,9 @@ if (!orchestratorState.recordingReservations) {
 }
 if (!orchestratorState.lastKickAtByCameraId) {
   orchestratorState.lastKickAtByCameraId = new Map<string, number>();
+}
+if (!orchestratorState.activatedAtByCameraId) {
+  orchestratorState.activatedAtByCameraId = new Map<string, number>();
 }
 
 if (!orchestratorScope[ORCHESTRATOR_SINGLETON_KEY]) {
@@ -93,6 +103,13 @@ const recordingReservations = orchestratorState.recordingReservations;
 // and on transient libcamera V4L2 buffer errors that recover by themselves.
 const STREAM_STALL_THRESHOLD_MS = 40000;
 const RECONCILE_INTERVAL_MS = 4000;
+
+// If the Pi Zero accepted startVideoStream but never produced a single RTP
+// packet within this window, assume rpicam-vid failed (V4L2, sensor busy,
+// crash before first frame) and re-issue the stop+start. Picked to be larger
+// than the Pi Zero self-heal cap (5 retries × ~2s) plus libcamera cold-start
+// (~10s), so we don't kick while the Pi Zero is still trying to recover.
+const FIRST_PACKET_TIMEOUT_MS = 30000;
 
 // Hard floor between successive kicks of the same camera. Even if the
 // reconciler and an activateCamera force-kick both decide the stream is
@@ -285,6 +302,7 @@ const activateCamera = async ({
 
   activatedCameraIds.add(cameraId);
   cameraIpById.set(cameraId, cameraIp);
+  orchestratorState.activatedAtByCameraId.set(cameraId, Date.now());
   ensureReconciler();
 
   // Spin up the Pi 5-side thumbnail extractor so dashboard / admin / cameras
@@ -307,6 +325,7 @@ const deactivateCamera = async ({
   // slate. Without this, a camera that flapped down and back up would still
   // be in a 60s cooldown from its last kick.
   orchestratorState.lastKickAtByCameraId.delete(cameraId);
+  orchestratorState.activatedAtByCameraId.delete(cameraId);
 
   // Stop the extractor BEFORE tearing down ingest so it can drain its last
   // chunk cleanly. Awaiting also gives ffmpeg a chance to flush.
@@ -404,6 +423,9 @@ const kickPiZeroStream = async ({
   // Reset staleness window so we don't fire the kick again on the next tick
   // before the new pipeline has had a chance to produce its first packet.
   markCameraIngestKicked(cameraId);
+  // Same reasoning for the first-packet timeout: a kick is effectively a
+  // re-activation, so reset its clock too.
+  orchestratorState.activatedAtByCameraId.set(cameraId, Date.now());
 };
 
 // Self-healing: every RECONCILE_INTERVAL_MS, check each activated camera's
@@ -419,10 +441,21 @@ const reconcileActiveStreams = async (): Promise<void> => {
 
   for (const cameraId of activatedCameraIds) {
     const lastPacketAt = getCameraIngestLastPacketAt(cameraId);
-    // lastPacketAt null means activation just happened and no packet has arrived
-    // yet — give it a grace window starting from "now - threshold" so we don't
-    // spam re-enqueues right after first start.
-    if (lastPacketAt === null) continue;
+    if (lastPacketAt === null) {
+      // Pi Zero never produced a single packet on this activation. If the
+      // window since activation has expired, the Pi Zero almost certainly
+      // crashed/exhausted-its-self-heal before first frame — re-issue
+      // stop+start. Without this branch, lastPacketAt stays null forever
+      // and the orchestrator gets permanently stuck after a Pi Zero crash.
+      const activatedAt = orchestratorState.activatedAtByCameraId.get(cameraId);
+      if (activatedAt !== undefined && now - activatedAt > FIRST_PACKET_TIMEOUT_MS) {
+        console.warn(
+          `[cam ${cameraId}] no first RTP packet ${String(now - activatedAt)}ms after activation — kicking Pi Zero`,
+        );
+        stale.push(cameraId);
+      }
+      continue;
+    }
     if (now - lastPacketAt > STREAM_STALL_THRESHOLD_MS) {
       stale.push(cameraId);
     }
