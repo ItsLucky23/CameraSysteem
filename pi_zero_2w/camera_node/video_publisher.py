@@ -227,9 +227,16 @@ class VideoPublisher:
 
     @staticmethod
     async def _kill_orphan_pipelines() -> None:
-        # Scoped to the two binaries we spawn. `pkill -f` matches the full command
-        # line. Never blocks startup on failure — this is best-effort self-heal.
-        patterns = ("rpicam-vid", "ffmpeg.*rtp")
+        # Scoped to the binaries that can hold /dev/video0. `pkill -f` matches
+        # the full command line. Never blocks startup on failure — this is
+        # best-effort self-heal.
+        # rpicam-jpeg is included because the thumbnail publisher fires one
+        # every ~1s; if it happens to be running when startVideoStream
+        # arrives, rpicam-vid fails to acquire the camera and exits with
+        # returncode=234 ("Pipeline handler in use by another process").
+        # The thumbnail publisher's loop continues on its own — killing one
+        # capture mid-flight just makes its next tick log a transient failure.
+        patterns = ("rpicam-vid", "ffmpeg.*rtp", "rpicam-jpeg")
         pkill_missing = False
         for pattern in patterns:
             try:
@@ -409,6 +416,23 @@ class VideoPublisher:
             return_code,
         )
 
+        # If the pipeline died unexpectedly with a positive exit code (rpicam-vid
+        # exits with 234 when it can't acquire the camera, e.g. when the
+        # thumbnail publisher's rpicam-jpeg is in flight at the moment
+        # startVideoStream arrives) and this drain task is still tracking the
+        # ACTIVE process (not a stale drain from a previously stopped one),
+        # trigger a self-heal. Without this, the V4L2-pattern detection alone
+        # misses the camera-busy / failed-to-acquire failure mode and the
+        # pipeline silently stays dead until Pi 5 re-issues startVideoStream.
+        # Negative returncodes mean the process was killed by signal — that's
+        # us, intentionally, so don't retry.
+        if (
+            return_code is not None
+            and return_code > 0
+            and self._process is process
+        ):
+            self._trigger_self_heal(reason=f"pipeline exited returncode={return_code}")
+
     def _consume_stderr_line(self, text: str) -> None:
         # Progress lines look like "frame=123", "fps=30.00", "progress=continue".
         if "=" not in text:
@@ -476,14 +500,22 @@ class VideoPublisher:
         if self._v4l2_failure_count < 2:
             return
 
+        self._trigger_self_heal(
+            reason="V4L2 failure loop detected",
+            last_line=text,
+        )
+
+    def _trigger_self_heal(self, reason: str, *, last_line: str | None = None) -> None:
+        # Single entry point for restart triggers. Two callers today:
+        # _check_v4l2_failure_pattern (stderr-driven) and _drain_stderr
+        # (returncode-driven). Both share the same retry-cap logic so the
+        # pipeline can't loop forever no matter which failure mode hits.
         if self._self_heal_in_progress:
             return
         if self._self_heal_task is not None and not self._self_heal_task.done():
             return
 
-        # Retry cap: max 5 self-heals inside a 60s window. Drop entries older
-        # than the window first so long-running healthy sessions don't carry
-        # ancient attempts forward.
+        now = time.monotonic()
         self._self_heal_attempts = [
             t for t in self._self_heal_attempts if now - t < 60.0
         ]
@@ -496,21 +528,22 @@ class VideoPublisher:
                     len(self._self_heal_attempts),
                 )
                 self._self_heal_giving_up_logged = True
-                # Kill the stuck pipeline so the Pi 5 sees RTP silence and the
-                # first-packet timeout fires. Without this we'd keep spinning
-                # on V4L2 errors forever.
                 if self._process is not None:
                     with contextlib.suppress(Exception):
                         self._process.kill()
             return
         self._self_heal_attempts.append(now)
 
+        # Reset the V4L2 sliding-window counter so the next pipeline starts
+        # clean even if we were triggered by a non-V4L2 reason.
         self._v4l2_failure_count = 0
+
+        suffix = f", last line: {last_line}" if last_line else ""
         logger.warning(
-            "VideoPublisher self-heal: V4L2 failure loop detected, "
-            "restarting pipeline (attempt %d/5, last line: %s)",
+            "VideoPublisher self-heal: %s — restarting pipeline (attempt %d/5%s)",
+            reason,
             len(self._self_heal_attempts),
-            text,
+            suffix,
         )
         self._self_heal_task = asyncio.create_task(self._restart_pipeline())
 
