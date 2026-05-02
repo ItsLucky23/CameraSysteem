@@ -35,11 +35,13 @@ class HardwareAdapter(ABC):
         """
 
     @abstractmethod
-    async def set_ir_strength(self, strength: int) -> None:
+    async def set_ir_strength(self, strength: int, *, source: str) -> None:
         """Live PWM-only adjustment without changing mode.
 
-        Used by the slider on the cameras page to dim the IR ring while in
-        'on' mode. A no-op if the adapter is not currently in 'on' mode.
+        source distinguishes user slider drags from Pi 5 auto-controller
+        commands so the adapter can reject system-driven strength when the
+        user is in 'on' mode (and vice versa). Pass 'user' for slider drags,
+        'system:ir-auto' for the Pi 5 auto controller.
         """
 
     @abstractmethod

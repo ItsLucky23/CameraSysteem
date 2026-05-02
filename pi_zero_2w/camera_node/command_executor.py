@@ -78,7 +78,14 @@ class CommandExecutor:
                     )
                 if is_log_enabled("ir"):
                     logger.info("[ir] cmd=irSetStrength strength=%s requestedBy=%s", strength, command.requested_by_user_id)
-                await self._adapter.set_ir_strength(strength)
+                # The Pi 5 auto controller sets requestedByUserId to
+                # 'system:ir-auto'; the slider on the cameras page sets it
+                # to the actual user id. The adapter uses this to refuse
+                # auto-driven strength while the user is in manual ON mode.
+                await self._adapter.set_ir_strength(
+                    strength,
+                    source=command.requested_by_user_id or "user",
+                )
             elif command.action == "recordStart":
                 await self._adapter.set_recording(True)
             elif command.action == "recordStop":

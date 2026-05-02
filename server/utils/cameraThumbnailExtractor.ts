@@ -49,10 +49,23 @@ interface ExtractorState {
   cleanup: () => void;
   buffer: Buffer;
   stopping: boolean;
+  // Set when ffmpeg's stderr reports "bind failed" — means the loopback port
+  // we picked was actually still pending release on the OS. Triggers an
+  // immediate fresh-port restart that does NOT consume the retry budget,
+  // so the 10/60s cap is reserved for genuine failures (RTP not flowing,
+  // codec issues, etc.).
+  bindErrorDetected: boolean;
 }
 
 interface ExtractorSingleton {
   extractors: Map<string, ExtractorState>;
+  // Per-camera ms timestamps of the most recent restart attempts. Used to
+  // cap the restart loop at 10 in 60s so a permanently broken stream can't
+  // pin a CPU spawning ffmpeg over and over.
+  restartAttempts: Map<string, number[]>;
+  // Per-camera pending restart timers so we don't stack multiple delayed
+  // restarts if exit() fires twice in quick succession.
+  restartTimers: Map<string, ReturnType<typeof globalThis.setTimeout>>;
 }
 
 const SINGLETON_KEY = '__luckyStackCameraThumbnailExtractorState__';
@@ -63,13 +76,60 @@ const scope = globalThis as typeof globalThis & {
 
 const state: ExtractorSingleton = scope[SINGLETON_KEY] ?? {
   extractors: new Map<string, ExtractorState>(),
+  restartAttempts: new Map<string, number[]>(),
+  restartTimers: new Map<string, ReturnType<typeof globalThis.setTimeout>>(),
 };
+
+// Backfill on HMR (existing singleton from before these maps were added).
+if (!state.restartAttempts) {
+  state.restartAttempts = new Map<string, number[]>();
+}
+if (!state.restartTimers) {
+  state.restartTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
+}
 
 if (!scope[SINGLETON_KEY]) {
   scope[SINGLETON_KEY] = state;
 }
 
+const scheduleRestart = (cameraId: string): void => {
+  const now = Date.now();
+  const attempts = (state.restartAttempts.get(cameraId) ?? []).filter(
+    (t) => now - t < 60_000,
+  );
+  if (attempts.length >= 10) {
+    console.warn(
+      `[thumbnail-extractor] giving up on ${cameraId} after ${String(attempts.length)} restarts in 60s — Pi 5 reconciler will retry on next activateCamera`,
+    );
+    state.restartAttempts.delete(cameraId);
+    return;
+  }
+  attempts.push(now);
+  state.restartAttempts.set(cameraId, attempts);
+
+  // Linear backoff capped at 5s. First retry is fast (500ms) because the
+  // common case is "ffmpeg exited because RTP wasn't flowing yet" and the
+  // Pi Zero usually recovers within a couple of seconds.
+  const backoffMs = Math.min(500 * attempts.length, 5_000);
+  console.log(
+    `[thumbnail-extractor] restarting ${cameraId} in ${String(backoffMs)}ms (attempt ${String(attempts.length)}/10)`,
+  );
+
+  const existingTimer = state.restartTimers.get(cameraId);
+  if (existingTimer) globalThis.clearTimeout(existingTimer);
+
+  const timer = globalThis.setTimeout(() => {
+    state.restartTimers.delete(cameraId);
+    void start(cameraId);
+  }, backoffMs);
+  state.restartTimers.set(cameraId, timer);
+};
+
 const handleJpegFrame = (cameraId: string, jpegBytes: Buffer): void => {
+  // Healthy frame arrived — reset the restart-attempt history so a future
+  // hiccup gets the full 10-retry budget instead of inheriting old failures.
+  state.restartAttempts.delete(cameraId);
+
   const capturedAt = new Date();
   const jpegBase64 = jpegBytes.toString('base64');
 
@@ -181,7 +241,16 @@ const start = async (cameraId: string): Promise<void> => {
     return;
   }
   const loopbackPort = (probeSocket.address() as { port: number }).port;
-  probeSocket.close();
+  // AWAIT close: probeSocket.close() is async and on Windows the OS keeps
+  // the UDP port in a pending-release state for a few ms. If we proceed to
+  // spawn ffmpeg before the OS frees the port, ffmpeg's bind hits
+  // WSAEADDRINUSE (-10048) and the extractor falls into a retry loop that
+  // burns the entire restart budget. Waiting for the 'close' event ensures
+  // the socket is fully released before we hand the port to ffmpeg.
+  await new Promise<void>((resolve) => {
+    probeSocket.once('close', () => resolve());
+    probeSocket.close();
+  });
 
   const sdpContent = [
     'v=0',
@@ -230,6 +299,12 @@ const start = async (cameraId: string): Promise<void> => {
     if (line.length > 0) {
       console.log(`[thumbnail-extractor] ffmpeg[${cameraId}]: ${line}`);
     }
+    // Detect bind contention so the on('exit') handler can re-probe a fresh
+    // port immediately instead of treating this as a real ffmpeg failure.
+    if (line.includes('bind failed')) {
+      const current = state.extractors.get(cameraId);
+      if (current) current.bindErrorDetected = true;
+    }
   });
 
   // Forward each RTP packet from the bridge subscription to the loopback
@@ -262,6 +337,7 @@ const start = async (cameraId: string): Promise<void> => {
     },
     buffer: Buffer.alloc(0),
     stopping: false,
+    bindErrorDetected: false,
   };
 
   ffmpegProcess.stdout.on('data', (chunk: Buffer) => {
@@ -275,8 +351,29 @@ const start = async (cameraId: string): Promise<void> => {
     extractor.unsubscribeRtp();
     if (!extractor.stopping) {
       console.warn(
-        `[thumbnail-extractor] ffmpeg exited unexpectedly cameraId=${cameraId} code=${String(code)} signal=${String(signal)}`,
+        `[thumbnail-extractor] ffmpeg exited unexpectedly cameraId=${cameraId} code=${String(code)} signal=${String(signal)} bindError=${String(extractor.bindErrorDetected)}`,
       );
+      if (extractor.bindErrorDetected) {
+        // Port-allocation race (loopback port still pending release on
+        // Windows when ffmpeg tried to bind it). NOT a real failure — re-
+        // probe immediately with a fresh port and DO NOT consume the
+        // retry budget. The 10/60s cap stays reserved for actual failures
+        // (RTP not flowing, codec issues, etc.).
+        const existingTimer = state.restartTimers.get(cameraId);
+        if (existingTimer) globalThis.clearTimeout(existingTimer);
+        const timer = globalThis.setTimeout(() => {
+          state.restartTimers.delete(cameraId);
+          void start(cameraId);
+        }, 100);
+        state.restartTimers.set(cameraId, timer);
+        return;
+      }
+      // Real failure: ffmpeg gives up when RTP isn't flowing (cold start,
+      // Pi Zero retry cycle) because it can't find codec parameters.
+      // Without this the extractor stays dead even after the Pi Zero
+      // recovers, breaking thumbnails AND auto-IR (which fires off each
+      // incoming JPEG via handleJpegFrame).
+      scheduleRestart(cameraId);
     }
   });
 
@@ -287,6 +384,15 @@ const start = async (cameraId: string): Promise<void> => {
 };
 
 const stop = async (cameraId: string): Promise<void> => {
+  // Cancel any pending restart so a manual stop isn't followed by an
+  // automatic restart from the backoff timer.
+  const pendingTimer = state.restartTimers.get(cameraId);
+  if (pendingTimer) {
+    globalThis.clearTimeout(pendingTimer);
+    state.restartTimers.delete(cameraId);
+  }
+  state.restartAttempts.delete(cameraId);
+
   const extractor = state.extractors.get(cameraId);
   if (!extractor) return;
 

@@ -250,11 +250,24 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 logger.info("[ir] mode=auto — awaiting Pi 5 irSetStrength (current=%s)", self._ir_active_strength)
             return
 
-    async def set_ir_strength(self, strength: int) -> None:
+    async def set_ir_strength(self, strength: int, *, source: str) -> None:
         clamped = _clamp(strength, 0, 100)
+        is_system = source.startswith("system:")
         if is_log_enabled("ir"):
-            logger.info("[ir] set_ir_strength input=%s clamped=%s mode=%s", strength, clamped, self._state.ir_mode)
+            logger.info(
+                "[ir] set_ir_strength input=%s clamped=%s mode=%s source=%s",
+                strength, clamped, self._state.ir_mode, source,
+            )
         if self._state.ir_mode == "on":
+            if is_system:
+                # Auto-controller command arrived while user is in manual ON
+                # mode — likely a stale enqueue from before the mode flip,
+                # OR a controller firing despite the gate. Either way we must
+                # NOT apply it, otherwise the LED brightness drifts based on
+                # scene luminance even though the user picked a fixed value.
+                if is_log_enabled("ir"):
+                    logger.info("[ir] set_ir_strength ignored — mode=on but source=system")
+                return
             # User slider drag: this is the operator's persisted manual value.
             self._ir_strength = clamped
             self._state.ir_strength = self._ir_strength
@@ -262,6 +275,14 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
             self._state.ir_enabled = clamped > 0
             return
         if self._state.ir_mode == "auto":
+            if not is_system:
+                # User slider drag arrived while in auto mode — the slider
+                # is meant to be disabled in the UI when in auto, so this
+                # is either a race or a stale command. Don't let it hijack
+                # the auto controller's value.
+                if is_log_enabled("ir"):
+                    logger.info("[ir] set_ir_strength ignored — mode=auto but source=user")
+                return
             # Pi 5 auto controller drove this — apply to the LED but do NOT
             # touch self._ir_strength (that holds the operator's last manual
             # value, restored when the user flips Auto -> On).

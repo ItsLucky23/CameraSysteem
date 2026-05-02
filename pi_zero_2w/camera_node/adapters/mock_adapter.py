@@ -86,15 +86,22 @@ class MockHardwareAdapter(HardwareAdapter):
             self._state.ir_active_strength = 50
             self._state.ir_enabled = True
 
-    async def set_ir_strength(self, strength: int) -> None:
+    async def set_ir_strength(self, strength: int, *, source: str) -> None:
         await asyncio.sleep(0)
         clamped = _clamp(strength, 0, 100)
+        is_system = source.startswith("system:")
         if self._state.ir_mode == "on":
+            if is_system:
+                # Mirror the rpi adapter: don't let auto-controller commands
+                # affect the LED while in manual ON mode.
+                return
             self._state.ir_strength = clamped
             self._state.ir_active_strength = clamped
             self._state.ir_enabled = clamped > 0
             return
         if self._state.ir_mode == "auto":
+            if not is_system:
+                return
             self._state.ir_active_strength = clamped
             self._state.ir_enabled = clamped > 0
             return
