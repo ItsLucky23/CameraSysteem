@@ -44,6 +44,16 @@ class VideoPublisher:
         # so a recovered hiccup leaves a single warning rather than a flood.
         self._last_stall_warn_at: float = 0.0
 
+        # Self-heal state for the V4L2 failure loop. rpicam-vid's *internal*
+        # restart can get stuck spamming "Device timeout detected" /
+        # "Failed to queue buffer X: Invalid argument" without ever exiting,
+        # so the existing returncode-based recovery never fires. We watch
+        # stderr for the pattern and externally restart the pipeline.
+        self._self_heal_task: asyncio.Task[None] | None = None
+        self._self_heal_in_progress: bool = False
+        self._v4l2_failure_count: int = 0
+        self._last_v4l2_failure_at: float = 0.0
+
     async def start(
         self,
         *,
@@ -128,6 +138,11 @@ class VideoPublisher:
         self._target_bitrate_bps = bitrate_bps
         self._target_width = effective_width
         self._target_height = effective_height
+
+        # Reset the self-heal sliding window for this fresh pipeline so a
+        # restart doesn't inherit stale failure counters from the prior run.
+        self._v4l2_failure_count = 0
+        self._last_v4l2_failure_at = 0.0
 
         # Drain stderr in the background so the pipe does not fill and deadlock the pipeline.
         asyncio.create_task(self._drain_stderr(self._process))
@@ -387,6 +402,7 @@ class VideoPublisher:
             # error, RTP send failure, etc.) is visible without re-deploying
             # at DEBUG level.
             logger.info("video pipeline: %s", text)
+            self._check_v4l2_failure_pattern(text)
             return
 
         if is_log_enabled("performance"):
@@ -418,3 +434,88 @@ class VideoPublisher:
         # Other key=value progress fields (bitrate=, total_size=, ...) are noisy
         # but useful when diagnosing — leave at debug.
         logger.debug("video pipeline: %s", text)
+
+    def _check_v4l2_failure_pattern(self, text: str) -> None:
+        # rpicam-vid's internal restart loop spams these two messages when the
+        # V4L2 capture queue gets stuck. The process keeps running so the
+        # returncode-based recovery never trips. Detect the pattern and force
+        # an external restart.
+        is_failure = (
+            "Device timeout detected" in text
+            or "Failed to queue buffer" in text
+        )
+        if not is_failure:
+            return
+
+        now = time.monotonic()
+        # Sliding 5s window: anything older resets the counter so isolated
+        # hiccups don't accumulate over hours and trigger a spurious restart.
+        if now - self._last_v4l2_failure_at > 5.0:
+            self._v4l2_failure_count = 0
+        self._last_v4l2_failure_at = now
+        self._v4l2_failure_count += 1
+
+        # Three failures inside the window = real loop, not a transient.
+        if self._v4l2_failure_count < 3:
+            return
+
+        if self._self_heal_in_progress:
+            return
+        if self._self_heal_task is not None and not self._self_heal_task.done():
+            return
+
+        self._v4l2_failure_count = 0
+        logger.warning(
+            "VideoPublisher self-heal: V4L2 failure loop detected, "
+            "restarting pipeline (last line: %s)",
+            text,
+        )
+        self._self_heal_task = asyncio.create_task(self._restart_pipeline())
+
+    async def _restart_pipeline(self) -> None:
+        if self._self_heal_in_progress:
+            return
+        self._self_heal_in_progress = True
+        try:
+            cached_host = self._target_host
+            cached_port = self._target_port
+            cached_fps = self._target_fps
+            cached_bitrate = self._target_bitrate_bps
+            cached_width = self._target_width
+            cached_height = self._target_height
+
+            if (
+                cached_host is None
+                or cached_port is None
+                or cached_fps is None
+                or cached_bitrate is None
+            ):
+                logger.warning(
+                    "VideoPublisher self-heal aborted: missing cached params "
+                    "(host=%s port=%s fps=%s bitrate=%s)",
+                    cached_host,
+                    cached_port,
+                    cached_fps,
+                    cached_bitrate,
+                )
+                return
+
+            await self.stop()
+            # start() runs its own _kill_orphan_pipelines() sweep + 0.3s
+            # settling sleep before respawning rpicam-vid, so we don't need
+            # to duplicate that here.
+            await self.start(
+                rtp_host=cached_host,
+                rtp_port=cached_port,
+                target_fps=cached_fps,
+                bitrate_bps=cached_bitrate,
+                width=cached_width,
+                height=cached_height,
+            )
+            logger.info("VideoPublisher self-heal restart completed")
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001
+            logger.warning("VideoPublisher self-heal restart failed: %s", error)
+        finally:
+            self._self_heal_in_progress = False
