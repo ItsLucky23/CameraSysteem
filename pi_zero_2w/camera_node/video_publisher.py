@@ -227,16 +227,18 @@ class VideoPublisher:
 
     @staticmethod
     async def _kill_orphan_pipelines() -> None:
-        # Scoped to the binaries that can hold /dev/video0. `pkill -f` matches
-        # the full command line. Never blocks startup on failure — this is
-        # best-effort self-heal.
-        # rpicam-jpeg is included because the thumbnail publisher fires one
-        # every ~1s; if it happens to be running when startVideoStream
-        # arrives, rpicam-vid fails to acquire the camera and exits with
-        # returncode=234 ("Pipeline handler in use by another process").
-        # The thumbnail publisher's loop continues on its own — killing one
-        # capture mid-flight just makes its next tick log a transient failure.
-        patterns = ("rpicam-vid", "ffmpeg.*rtp", "rpicam-jpeg")
+        # Scoped to the two binaries we spawn. `pkill -f` matches the full
+        # command line. Never blocks startup on failure — this is best-effort
+        # self-heal.
+        # NOTE: do NOT add rpicam-jpeg here — the thumbnail publisher runs it
+        # on a 1s loop and an orphan sweep on every start()/self-heal retry
+        # would prevent any thumbnail from ever completing during a retry
+        # cycle, which kills auto-IR (the IR controller fires on incoming
+        # thumbnails). The camera-busy race that could happen is handled by
+        # the retry-on-returncode self-heal: rpicam-vid exits with 234,
+        # we retry after the 0.3s settle, and the next rpicam-jpeg cycle
+        # has finished by then.
+        patterns = ("rpicam-vid", "ffmpeg.*rtp")
         pkill_missing = False
         for pattern in patterns:
             try:
