@@ -16,6 +16,7 @@ KNOWN_FEATURES = frozenset({
     "performance",
     "streamPipeline",
     "commandQueue",
+    "audioPipeline",
 })
 
 

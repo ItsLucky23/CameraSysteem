@@ -87,5 +87,36 @@ class HardwareAdapter(ABC):
         """Set zoom level (1..100). Stub until real zoom hardware exists."""
 
     @abstractmethod
-    async def set_talkback(self, enabled: bool) -> None:
-        """Toggle two-way audio. Stub until speaker hardware exists."""
+    async def start_audio_uplink(
+        self,
+        *,
+        rtp_host: str,
+        rtp_port: int,
+    ) -> None:
+        """Start sending I2S mic audio to the Pi 5 as Opus RTP.
+
+        Direction is named from the Pi Zero's perspective: uplink = node -> server.
+        Bitrate / device come from NodeSettings; the command payload only carries
+        the network target so a single Pi 5 ingest port can be reassigned without
+        the Pi Zero reading server-side env state.
+        """
+
+    @abstractmethod
+    async def stop_audio_uplink(self) -> None:
+        """Stop the mic-to-server audio pipeline."""
+
+    @abstractmethod
+    async def start_audio_downlink(
+        self,
+        *,
+        local_port: int,
+    ) -> None:
+        """Listen on a local UDP port for Opus RTP from the Pi 5 and play it
+        through the I2S amplifier.
+
+        Direction is named from the Pi Zero's perspective: downlink = server -> node.
+        """
+
+    @abstractmethod
+    async def stop_audio_downlink(self) -> None:
+        """Stop the server-to-speaker audio pipeline."""

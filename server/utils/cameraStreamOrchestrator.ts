@@ -12,6 +12,16 @@ import {
   startCameraIngest,
   stopCameraIngest,
 } from './cameraWebrtcBridge';
+import {
+  getCameraAudioEgressPort,
+  getCameraAudioIngestPort,
+  isCameraAudioEgressRunning,
+  isCameraAudioIngestRunning,
+  startCameraAudioEgress,
+  startCameraAudioIngest,
+  stopCameraAudioEgress,
+  stopCameraAudioIngest,
+} from './cameraAudioBridge';
 import { cameraThumbnailExtractor } from './cameraThumbnailExtractor';
 
 const SYSTEM_USER_ID = '__system__';
@@ -300,6 +310,37 @@ const activateCamera = async ({
     return;
   }
 
+  // Audio: spin up bridge sockets and tell the Pi Zero to start both pipelines.
+  // The Pi Zero no-ops these if AUDIO_INPUT_DEVICE / AUDIO_OUTPUT_DEVICE are
+  // unset, so a node without I2S hardware just ignores the commands.
+  const audioIngest = isCameraAudioIngestRunning(cameraId)
+    ? { rtpPort: getCameraAudioIngestPort(cameraId)! }
+    : startCameraAudioIngest({ cameraId });
+  const audioEgress = isCameraAudioEgressRunning(cameraId)
+    ? { remotePort: getCameraAudioEgressPort(cameraId)! }
+    : startCameraAudioEgress({ cameraId, cameraIp });
+
+  await tryCatch(async () => {
+    return enqueueCommand({
+      cameraIp,
+      cameraId,
+      commandId: randomUUID(),
+      action: 'startAudioUplink',
+      payload: { rtpHost: pi5LanIp, rtpPort: audioIngest.rtpPort },
+      requestedByUserId: SYSTEM_USER_ID,
+    });
+  });
+  await tryCatch(async () => {
+    return enqueueCommand({
+      cameraIp,
+      cameraId,
+      commandId: randomUUID(),
+      action: 'startAudioDownlink',
+      payload: { localPort: audioEgress.remotePort },
+      requestedByUserId: SYSTEM_USER_ID,
+    });
+  });
+
   activatedCameraIds.add(cameraId);
   cameraIpById.set(cameraId, cameraIp);
   orchestratorState.activatedAtByCameraId.set(cameraId, Date.now());
@@ -341,8 +382,30 @@ const deactivateCamera = async ({
       requestedByUserId: SYSTEM_USER_ID,
     });
   });
+  await tryCatch(async () => {
+    return enqueueCommand({
+      cameraIp,
+      cameraId,
+      commandId: randomUUID(),
+      action: 'stopAudioUplink',
+      payload: {},
+      requestedByUserId: SYSTEM_USER_ID,
+    });
+  });
+  await tryCatch(async () => {
+    return enqueueCommand({
+      cameraIp,
+      cameraId,
+      commandId: randomUUID(),
+      action: 'stopAudioDownlink',
+      payload: {},
+      requestedByUserId: SYSTEM_USER_ID,
+    });
+  });
 
   stopCameraIngest({ cameraId });
+  stopCameraAudioIngest({ cameraId });
+  stopCameraAudioEgress({ cameraId });
 };
 
 // Send stop+start to the Pi Zero without touching the ingest socket or any

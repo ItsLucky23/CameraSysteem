@@ -29,6 +29,9 @@ def build_adapter(settings: NodeSettings):
             # MOTION DETECTION LOGIC (end)
             recording_start_command=settings.recording_start_command,
             recording_stop_command=settings.recording_stop_command,
+            audio_input_device=settings.audio_input_device,
+            audio_output_device=settings.audio_output_device,
+            audio_bitrate_bps=settings.audio_bitrate_bps,
         )
 
     raise ValueError(f"Unknown HARDWARE_ADAPTER value: {settings.adapter}")

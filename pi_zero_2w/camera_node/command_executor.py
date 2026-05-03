@@ -104,10 +104,34 @@ class CommandExecutor:
                 state = await self._adapter.get_state()
                 new_level = max(1, (state.zoom_level or 50) - 10)
                 await self._adapter.set_zoom(new_level)
-            elif command.action == "talkbackOn":
-                await self._adapter.set_talkback(True)
-            elif command.action == "talkbackOff":
-                await self._adapter.set_talkback(False)
+            elif command.action == "startAudioUplink":
+                audio_uplink = _validate_audio_uplink(command.payload)
+                if audio_uplink is None:
+                    return CommandResult(
+                        command_id=command.command_id,
+                        action=command.action,
+                        result="rejected",
+                        reason_code="camera.invalidInput",
+                    )
+                rtp_host, rtp_port = audio_uplink
+                await self._adapter.start_audio_uplink(
+                    rtp_host=rtp_host,
+                    rtp_port=rtp_port,
+                )
+            elif command.action == "stopAudioUplink":
+                await self._adapter.stop_audio_uplink()
+            elif command.action == "startAudioDownlink":
+                local_port = _validate_audio_downlink(command.payload)
+                if local_port is None:
+                    return CommandResult(
+                        command_id=command.command_id,
+                        action=command.action,
+                        result="rejected",
+                        reason_code="camera.invalidInput",
+                    )
+                await self._adapter.start_audio_downlink(local_port=local_port)
+            elif command.action == "stopAudioDownlink":
+                await self._adapter.stop_audio_downlink()
             elif command.action == "startVideoStream":
                 validation = _validate_start_video_stream(command.payload)
                 if validation is None:
@@ -233,6 +257,39 @@ def _parse_log_flags(payload: dict[str, Any]) -> set[str] | None:
             return None
         cleaned.add(item)
     return cleaned
+
+
+def _validate_audio_uplink(payload: dict[str, Any]) -> tuple[str, int] | None:
+    rtp_host_raw = payload.get("rtpHost")
+    rtp_port_raw = payload.get("rtpPort")
+
+    if not isinstance(rtp_host_raw, str):
+        return None
+    rtp_host = rtp_host_raw.strip()
+    if not rtp_host:
+        return None
+
+    if isinstance(rtp_port_raw, bool):
+        return None
+    if not isinstance(rtp_port_raw, int):
+        return None
+    if rtp_port_raw <= 0 or rtp_port_raw > 65535:
+        return None
+
+    return rtp_host, rtp_port_raw
+
+
+def _validate_audio_downlink(payload: dict[str, Any]) -> int | None:
+    local_port_raw = payload.get("localPort")
+
+    if isinstance(local_port_raw, bool):
+        return None
+    if not isinstance(local_port_raw, int):
+        return None
+    if local_port_raw <= 0 or local_port_raw > 65535:
+        return None
+
+    return local_port_raw
 
 
 def _parse_strength(payload: dict[str, Any], *, default_when_missing: int | None) -> int | None:

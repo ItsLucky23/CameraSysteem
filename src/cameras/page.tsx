@@ -106,9 +106,7 @@ type CommandAction =
   | 'irOn'
   | 'irOff'
   | 'recordStart'
-  | 'recordStop'
-  | 'talkbackOn'
-  | 'talkbackOff';
+  | 'recordStop';
 
 // Tilt is still positional (no continuous-rotation tilt servo wired yet).
 type PtzAction = 'tiltUp' | 'tiltDown';
@@ -157,7 +155,12 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const previewPeerCameraIdRef = useRef<string | null>(null);
   const previewStartingRef = useRef<boolean>(false);
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewStreamRef = useRef<MediaStream | null>(null);
+  const previewAudioStreamRef = useRef<MediaStream | null>(null);
+  // Audio sender on the WebRTC peer. Stored so the mic toggle can swap the
+  // local media track in/out via replaceTrack without renegotiating SDP.
+  const audioSenderRef = useRef<RTCRtpSender | null>(null);
 
   const micStreamRef = useRef<MediaStream | null>(null);
   const micAudioContextRef = useRef<AudioContext | null>(null);
@@ -185,6 +188,10 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const [outputAudioEnabled, setOutputAudioEnabled] = useState<boolean>(true);
   const [uplinkMicEnabled, setUplinkMicEnabled] = useState<boolean>(false);
   const [micLevel, setMicLevel] = useState<number>(0);
+  // Mic ownership broadcast by the server. Null = nobody has mic enabled on
+  // this camera. When set to a userId other than session.id, the talk button
+  // is disabled and we surface "<name> is talking" in the UI.
+  const [micEnabledByUser, setMicEnabledByUser] = useState<{ userId: string; userName: string } | null>(null);
   const [recordingStartedAt, setRecordingStartedAt] = useState<string | null>(null);
   const [recordingDurationLabel, setRecordingDurationLabel] = useState<string>('00:00:00');
   const seededRecordingForCameraIdRef = useRef<string | null>(null);
@@ -218,16 +225,23 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const forcedCameraId = params?.id ?? params?.cameraId ?? params?.cameraid ?? searchParams?.cameraId ?? searchParams?.id ?? null;
 
   const clearPreviewVideoElement = useCallback(() => {
-    if (!previewVideoRef.current) return;
-    previewVideoRef.current.srcObject = null;
+    if (previewVideoRef.current) previewVideoRef.current.srcObject = null;
+    if (previewAudioRef.current) previewAudioRef.current.srcObject = null;
   }, []);
 
   const stopPreviewStream = useCallback(() => {
-    if (!previewStreamRef.current) return;
-    for (const track of previewStreamRef.current.getTracks()) {
-      track.stop();
+    if (previewStreamRef.current) {
+      for (const track of previewStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      previewStreamRef.current = null;
     }
-    previewStreamRef.current = null;
+    if (previewAudioStreamRef.current) {
+      for (const track of previewAudioStreamRef.current.getTracks()) {
+        track.stop();
+      }
+      previewAudioStreamRef.current = null;
+    }
   }, []);
 
   const stopPreviewConnection = useCallback(() => {
@@ -236,6 +250,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     previewPeerRef.current.onconnectionstatechange = null;
     previewPeerRef.current.close();
     previewPeerRef.current = null;
+    audioSenderRef.current = null;
 
     const peerId = previewPeerIdRef.current;
     const cameraId = previewPeerCameraIdRef.current;
@@ -552,6 +567,27 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       },
     });
 
+    const unsubscribeMicEnabled = upsertSyncEventCallback({
+      name: 'cameras/micEnabledChanged',
+      version: 'v1',
+      callback: ({ serverOutput }) => {
+        if (selectedCameraId !== serverOutput.cameraId) return;
+        if (serverOutput.enabled && serverOutput.userId) {
+          setMicEnabledByUser({
+            userId: serverOutput.userId,
+            userName: serverOutput.userName ?? '',
+          });
+          // Someone else owns the mic — make sure our own toggle reflects
+          // that we're not currently talking. Idempotent if it was already off.
+          if (serverOutput.userId !== session?.id) {
+            setUplinkMicEnabled(false);
+          }
+        } else {
+          setMicEnabledByUser(null);
+        }
+      },
+    });
+
     return () => {
       unsubscribeState();
       unsubscribeCommand();
@@ -560,6 +596,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       unsubscribeThumbnail();
       unsubscribeRecording();
       unsubscribeControlSession();
+      unsubscribeMicEnabled();
     };
   }, [selectedCameraId, session?.id, stopPreview, upsertSyncEventCallback]);
 
@@ -567,6 +604,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   // current state on the room subscribe so we don't show stale info.
   useEffect(() => {
     setControlSession(null);
+    setMicEnabledByUser(null);
+    setUplinkMicEnabled(false);
     setPreviewZoom(1);
   }, [selectedCameraId]);
 
@@ -789,18 +828,44 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
     previewPeerRef.current = peerConnection;
     peerConnection.addTransceiver('video', { direction: 'recvonly' });
+    // Audio is sendrecv from the start so the mic toggle can swap a local
+    // track in via replaceTrack without renegotiating SDP. Until the toggle
+    // turns on, the sender stays attached to a null track and emits nothing.
+    const audioTransceiver = peerConnection.addTransceiver('audio', { direction: 'sendrecv' });
+    audioSenderRef.current = audioTransceiver.sender;
 
     peerConnection.ontrack = (event) => {
-      const firstStream = event.streams[0];
-      previewStreamRef.current = firstStream;
-      if (previewVideoRef.current) {
-        previewVideoRef.current.srcObject = firstStream;
-        previewVideoRef.current.muted = !outputAudioEnabled;
+      const incomingTrack = event.track;
+      if (incomingTrack.kind === 'video') {
+        const firstStream = event.streams[0] ?? new MediaStream([incomingTrack]);
+        previewStreamRef.current = firstStream;
+        if (previewVideoRef.current) {
+          previewVideoRef.current.srcObject = firstStream;
+          previewVideoRef.current.muted = !outputAudioEnabled;
+        }
+        setPreviewActive(true);
+        previewStartingRef.current = false;
+        setPreviewStarting(false);
+        setPreviewStatusKey('cameras.previewConnected');
+        return;
       }
-      setPreviewActive(true);
-      previewStartingRef.current = false;
-      setPreviewStarting(false);
-      setPreviewStatusKey('cameras.previewConnected');
+      if (incomingTrack.kind === 'audio') {
+        // Camera-mic downlink: always-on listening for any client. Volume
+        // is governed by the user's device volume, not an in-app slider, so
+        // the audio element starts unmuted at default volume. The existing
+        // outputAudioEnabled toggle still controls per-tab mute.
+        const audioStream = event.streams[0] ?? new MediaStream([incomingTrack]);
+        previewAudioStreamRef.current = audioStream;
+        if (previewAudioRef.current) {
+          previewAudioRef.current.srcObject = audioStream;
+          previewAudioRef.current.muted = !outputAudioEnabled;
+          // play() can reject if the user hasn't interacted yet — they have,
+          // by clicking into the camera, but be defensive about deep links.
+          void previewAudioRef.current.play().catch(() => {
+            /* autoplay blocked; user can click anywhere to unblock */
+          });
+        }
+      }
     };
 
     peerConnection.onconnectionstatechange = () => {
@@ -940,20 +1005,67 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
         micAudioContextRef.current = null;
       }
       setMicLevel(0);
+      // Detach mic from the WebRTC sender so the camera speaker goes silent.
+      if (audioSenderRef.current) {
+        void audioSenderRef.current.replaceTrack(null).catch(() => {
+          /* sender may have been torn down with the peer */
+        });
+      }
     };
+
+    if (!selectedCameraId) {
+      stopMicCapture();
+      return;
+    }
 
     if (!uplinkMicEnabled) {
       stopMicCapture();
+      // Best-effort tell the server the mic is off. If we never enabled it
+      // server-side this is a no-op; if we did, this releases the redis lock.
+      void apiRequest({
+        name: 'cameras/setMicEnabled',
+        version: 'v1',
+        data: { cameraId: selectedCameraId, enabled: false },
+      });
       return;
     }
 
     let cancelled = false;
 
     const startMicCapture = async () => {
-      const [streamError, stream] = await tryCatch(async () => navigator.mediaDevices.getUserMedia({ audio: true, video: false }));
+      // Server-side gate first — ensures we hold the control session and the
+      // mic-enabled redis lock before fighting the user for mic permission.
+      const apiResponse = await apiRequest({
+        name: 'cameras/setMicEnabled',
+        version: 'v1',
+        data: { cameraId: selectedCameraId, enabled: true },
+      });
+      if (apiResponse.status === 'error') {
+        setUplinkMicEnabled(false);
+        notify.error({ key: apiResponse.errorCode });
+        return;
+      }
+      if (cancelled) return;
+
+      const [streamError, stream] = await tryCatch(async () =>
+        navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        }),
+      );
 
       if (streamError || !stream) {
         setUplinkMicEnabled(false);
+        // Roll back the server-side lock so other users can talk.
+        void apiRequest({
+          name: 'cameras/setMicEnabled',
+          version: 'v1',
+          data: { cameraId: selectedCameraId, enabled: false },
+        });
         notify.error({ key: 'camera.unexpectedError' });
         return;
       }
@@ -964,6 +1076,14 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       }
 
       micStreamRef.current = stream;
+
+      // Push mic into the WebRTC peer so server-side werift starts receiving
+      // RTP and forwarding it to the Pi Zero's audio_subscriber.
+      const micTrack = stream.getAudioTracks()[0];
+      if (micTrack && audioSenderRef.current) {
+        await tryCatch(async () => audioSenderRef.current!.replaceTrack(micTrack));
+      }
+
       const audioContext = new AudioContext();
       micAudioContextRef.current = audioContext;
 
@@ -996,11 +1116,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       cancelled = true;
       stopMicCapture();
     };
-  }, [uplinkMicEnabled]);
+  }, [uplinkMicEnabled, selectedCameraId]);
 
   useEffect(() => {
-    if (!previewVideoRef.current) return;
-    previewVideoRef.current.muted = !outputAudioEnabled;
+    if (previewVideoRef.current) previewVideoRef.current.muted = !outputAudioEnabled;
+    if (previewAudioRef.current) previewAudioRef.current.muted = !outputAudioEnabled;
   }, [outputAudioEnabled, previewActive]);
 
   const isController = controlSession?.userId === session?.id && !!session?.id;
@@ -1012,7 +1132,16 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   // Zoom is now client-side CSS scale — no Pi Zero round-trip, no hardware
   // dependency. Only blocked while the user isn't the controller.
   const zoomDisabled = controlsDisabled;
-  const talkbackDisabled = controlsDisabled || !(caps?.hasSpeaker ?? true);
+  // Mic toggle is gated by control + speaker hardware + ownership: if someone
+  // else has their mic enabled on this camera, we lock the toggle out so only
+  // one person can talk at a time.
+  const someoneElseTalking =
+    micEnabledByUser !== null && micEnabledByUser.userId !== (session?.id ?? '');
+  const talkbackDisabled =
+    controlsDisabled || !(caps?.hasSpeaker ?? true) || someoneElseTalking;
+  const talkingLabel = someoneElseTalking
+    ? translate({ key: 'aperture.monitor.audioMicHeldByOther' }).replace('{{name}}', micEnabledByUser?.userName || '')
+    : null;
   const sysAudioDisabled = !(caps?.hasMicrophone ?? true);
 
   const fpsLabel = useMemo(() => {
@@ -1323,6 +1452,19 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                 >
                   <track kind="captions" />
                 </video>
+                {/*
+                  Camera-mic downlink. Always-on listening regardless of who
+                  has control — volume is controlled by the user's device.
+                  Hidden from layout; the audio sink is the only thing we need.
+                */}
+                <audio
+                  autoPlay
+                  className="hidden"
+                  muted={!outputAudioEnabled}
+                  ref={previewAudioRef}
+                >
+                  <track kind="captions" />
+                </audio>
 
                 <div
                   className="pointer-events-none absolute inset-0"
@@ -1556,13 +1698,13 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                       <Toggle
                         on={uplinkMicEnabled}
                         disabled={talkbackDisabled}
-                        onChange={(next) => {
-                          setUplinkMicEnabled(next);
-                          void sendCommand(next ? 'talkbackOn' : 'talkbackOff');
-                        }}
+                        onChange={setUplinkMicEnabled}
                         ariaLabel={translate({ key: 'aperture.monitor.audioMic' })}
                       />
                     </label>
+                    {talkingLabel && (
+                      <div className="text-[11px] text-muted">{talkingLabel}</div>
+                    )}
                     {uplinkMicEnabled && (
                       <div className="h-1.5 w-full overflow-hidden rounded-full bg-container2">
                         <div className="h-full bg-primary transition-all duration-100" style={{ width: `${String(micLevel)}%` }} />
@@ -1573,12 +1715,13 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
                 {session?.admin && selectedCameraId && (() => {
                   const activeFlags = new Set(logFlagsByCamera[selectedCameraId]);
-                  const features: { key: 'ir' | 'recording' | 'performance' | 'streamPipeline' | 'commandQueue'; label: string }[] = [
+                  const features: { key: 'ir' | 'recording' | 'performance' | 'streamPipeline' | 'commandQueue' | 'audioPipeline'; label: string }[] = [
                     { key: 'ir', label: translate({ key: 'aperture.monitor.debugFeatureIr' }) },
                     { key: 'recording', label: translate({ key: 'aperture.monitor.debugFeatureRecording' }) },
                     { key: 'performance', label: translate({ key: 'aperture.monitor.debugFeaturePerformance' }) },
                     { key: 'streamPipeline', label: translate({ key: 'aperture.monitor.debugFeatureStream' }) },
                     { key: 'commandQueue', label: translate({ key: 'aperture.monitor.debugFeatureCommands' }) },
+                    { key: 'audioPipeline', label: translate({ key: 'aperture.monitor.debugFeatureAudio' }) },
                   ];
                   return (
                     <section className="rounded-2xl border border-container1-border bg-container1 p-4">

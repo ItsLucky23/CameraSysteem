@@ -35,8 +35,6 @@ class MockHardwareAdapter(HardwareAdapter):
             recording=False,
             zoom_level=50,
         )
-        self._talkback_enabled = False
-
     async def startup(self) -> None:
         await asyncio.sleep(0)
 
@@ -176,10 +174,33 @@ class MockHardwareAdapter(HardwareAdapter):
         except Exception as error:  # noqa: BLE001
             print(f"[adapter] set_zoom failed: {error}")
 
-    async def set_talkback(self, enabled: bool) -> None:
+    async def start_audio_uplink(
+        self,
+        *,
+        rtp_host: str,
+        rtp_port: int,
+    ) -> None:
         await asyncio.sleep(0)
-        try:
-            self._talkback_enabled = bool(enabled)
-            print(f"[adapter] set_talkback enabled={self._talkback_enabled}")
-        except Exception as error:  # noqa: BLE001
-            print(f"[adapter] set_talkback failed: {error}")
+        logger.info(
+            "MockHardwareAdapter: pretending to start audio uplink to %s:%s",
+            rtp_host, rtp_port,
+        )
+
+    async def stop_audio_uplink(self) -> None:
+        await asyncio.sleep(0)
+        logger.info("MockHardwareAdapter: pretending to stop audio uplink")
+
+    async def start_audio_downlink(
+        self,
+        *,
+        local_port: int,
+    ) -> None:
+        await asyncio.sleep(0)
+        logger.info(
+            "MockHardwareAdapter: pretending to start audio downlink on port %s",
+            local_port,
+        )
+
+    async def stop_audio_downlink(self) -> None:
+        await asyncio.sleep(0)
+        logger.info("MockHardwareAdapter: pretending to stop audio downlink")

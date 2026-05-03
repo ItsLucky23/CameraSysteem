@@ -1,9 +1,14 @@
 import { createSocket, Socket } from 'node:dgram';
 import { randomUUID } from 'node:crypto';
 
-import { MediaStreamTrack, RTCPeerConnection, RtpPacket, useH264 } from 'werift';
+import { MediaStreamTrack, RTCPeerConnection, RtpPacket, useH264, useOPUS } from 'werift';
 
 import { tryCatch } from '../functions/tryCatch';
+import {
+  attachAudioIngestTrack,
+  isCameraAudioIngestRunning,
+  writeAudioEgressRtp,
+} from './cameraAudioBridge';
 
 interface IceCandidatePayload {
   candidate: string;
@@ -367,15 +372,50 @@ export const createCameraWebrtcAnswer = async ({
   // werift-side codec pin: the Pi Zero emits H.264 baseline RTP on payload type
   // 96, and we forward those packets verbatim, so the answer must advertise the
   // exact same codec/PT. profile-level-id=42e01f = Constrained Baseline 3.1.
+  // Audio uses Opus on PT 111 — both for the camera-mic downlink (sendonly to
+  // browser) and the talker-mic uplink (recvonly from browser). One transceiver
+  // with sendrecv covers both.
   const peerConnection = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
     codecs: {
       video: [useH264({ payloadType: 96 })],
+      audio: [useOPUS({ payloadType: 111 })],
     },
   });
 
   const track = new MediaStreamTrack({ kind: 'video' });
   peerConnection.addTransceiver(track, { direction: 'sendonly' });
+
+  // Audio is wired only when the camera-mic ingest is up. Without it, the
+  // camera mic isn't streaming yet and the browser would just hear silence;
+  // we still expose a sendrecv transceiver so the same answer SDP works once
+  // ingest comes online without forcing a re-offer.
+  const audioIngestRunning = isCameraAudioIngestRunning(cameraId);
+  const audioTrack = new MediaStreamTrack({ kind: 'audio' });
+  peerConnection.addTransceiver(audioTrack, { direction: 'sendrecv' });
+
+  const detachAudioIngest = audioIngestRunning
+    ? attachAudioIngestTrack(cameraId, audioTrack)
+    : (() => undefined);
+
+  // Browser-to-camera audio (the talker's mic). When the browser sends audio
+  // on its sendrecv transceiver, werift surfaces it via onTrack. We forward
+  // the raw RTP straight to cameraAudioBridge which sendto's the Pi Zero.
+  peerConnection.onTrack.subscribe((incomingTrack) => {
+    if (incomingTrack.kind !== 'audio') {
+      return;
+    }
+    incomingTrack.onReceiveRtp.subscribe((rtpPacket: RtpPacket) => {
+      try {
+        writeAudioEgressRtp(cameraId, rtpPacket.serialize());
+      } catch (forwardError) {
+        console.warn(
+          `cameraWebrtcBridge[${cameraId}] failed to forward browser audio rtp`,
+          forwardError,
+        );
+      }
+    });
+  });
 
   const peerId = randomUUID();
   const peer: ForwardPeer = {
@@ -396,6 +436,12 @@ export const createCameraWebrtcAnswer = async ({
     } catch {
       // track may already be stopped.
     }
+    try {
+      audioTrack.stop();
+    } catch {
+      // audio track may already be stopped.
+    }
+    detachAudioIngest();
     void tryCatch(async () => peerConnection.close());
   };
 

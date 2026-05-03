@@ -8,6 +8,8 @@ import logging
 # MOTION DETECTION LOGIC (end)
 
 from camera_node.adapters.base import HardwareAdapter
+from camera_node.audio_publisher import AudioPublisher
+from camera_node.audio_subscriber import AudioSubscriber
 from camera_node.log_flags import is_log_enabled
 from camera_node.models import CameraState
 from camera_node.video_publisher import VideoPublisher
@@ -40,6 +42,9 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         # MOTION DETECTION LOGIC (end)
         recording_start_command: str | None,
         recording_stop_command: str | None,
+        audio_input_device: str | None = None,
+        audio_output_device: str | None = None,
+        audio_bitrate_bps: int = 32000,
     ) -> None:
         self._ir_gpio_pin = ir_gpio_pin
         self._pan_servo_gpio_pin = pan_servo_gpio_pin
@@ -49,6 +54,9 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         # MOTION DETECTION LOGIC (end)
         self._recording_start_command = recording_start_command
         self._recording_stop_command = recording_stop_command
+        self._audio_input_device = audio_input_device
+        self._audio_output_device = audio_output_device
+        self._audio_bitrate_bps = audio_bitrate_bps
 
         self._ir_device = None
         self._pan_servo = None
@@ -58,7 +66,8 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         # MOTION DETECTION LOGIC (end)
         self._recording_process: asyncio.subprocess.Process | None = None
         self._video_publisher = VideoPublisher()
-        self._talkback_enabled = False
+        self._audio_publisher = AudioPublisher()
+        self._audio_subscriber = AudioSubscriber()
 
         # IR PWM state. _ir_strength is the persisted user-set value (used in
         # 'on' mode). _ir_active_strength reflects what the LED is actually
@@ -187,6 +196,8 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
 
     async def shutdown(self) -> None:
         await self._video_publisher.stop()
+        await self._audio_publisher.stop()
+        await self._audio_subscriber.stop()
         await self._stop_recording_process()
 
         self._close_servo(self._pan_servo)
@@ -428,12 +439,44 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         except Exception as error:  # noqa: BLE001
             print(f"[adapter] set_zoom failed: {error}")
 
-    async def set_talkback(self, enabled: bool) -> None:
-        try:
-            self._talkback_enabled = bool(enabled)
-            print(f"[adapter] set_talkback enabled={self._talkback_enabled}")
-        except Exception as error:  # noqa: BLE001
-            print(f"[adapter] set_talkback failed: {error}")
+    async def start_audio_uplink(
+        self,
+        *,
+        rtp_host: str,
+        rtp_port: int,
+    ) -> None:
+        if not self._audio_input_device:
+            logger.info(
+                "[audio] start_audio_uplink ignored — AUDIO_INPUT_DEVICE unset (no I2S mic wired yet)"
+            )
+            return
+        await self._audio_publisher.start(
+            rtp_host=rtp_host,
+            rtp_port=rtp_port,
+            input_device=self._audio_input_device,
+            bitrate_bps=self._audio_bitrate_bps,
+        )
+
+    async def stop_audio_uplink(self) -> None:
+        await self._audio_publisher.stop()
+
+    async def start_audio_downlink(
+        self,
+        *,
+        local_port: int,
+    ) -> None:
+        if not self._audio_output_device:
+            logger.info(
+                "[audio] start_audio_downlink ignored — AUDIO_OUTPUT_DEVICE unset (no I2S amp wired yet)"
+            )
+            return
+        await self._audio_subscriber.start(
+            local_port=local_port,
+            output_device=self._audio_output_device,
+        )
+
+    async def stop_audio_downlink(self) -> None:
+        await self._audio_subscriber.stop()
 
     async def _start_recording_process(self) -> None:
         if self._recording_process and self._recording_process.returncode is None:

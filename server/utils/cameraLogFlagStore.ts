@@ -10,6 +10,7 @@ export const LOG_FEATURES = [
   'performance',
   'streamPipeline',
   'commandQueue',
+  'audioPipeline',
 ] as const;
 
 export type LogFeature = typeof LOG_FEATURES[number];

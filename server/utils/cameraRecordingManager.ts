@@ -12,6 +12,12 @@ import {
   removeRecordingReservation,
 } from './cameraStreamOrchestrator';
 import { subscribeRtp } from './cameraWebrtcBridge';
+import {
+  isCameraAudioEgressRunning,
+  isCameraAudioIngestRunning,
+  subscribeAudioEgressRtp,
+  subscribeAudioIngestRtp,
+} from './cameraAudioBridge';
 import { emitCameraSyncEvent, getCameraRoomCode } from './cameraHelpers';
 
 type StopReason =
@@ -37,6 +43,8 @@ interface ActiveRecording {
   startedByUserId: string;
   ffmpeg: ChildProcessWithoutNullStreams;
   unsubscribeRtp: () => void;
+  unsubscribeAudioIngest: (() => void) | null;
+  unsubscribeAudioEgress: (() => void) | null;
   expirationTimer: ReturnType<typeof globalThis.setTimeout>;
   noRtpTimer: ReturnType<typeof globalThis.setInterval>;
   lastRtpAt: number | null;
@@ -210,22 +218,35 @@ const startRecording = async (params: {
   // that port using a plain SDP file. `-c copy -f mp4` writes the bitstream
   // straight to disk with no re-encode.
   //
+  // For 2-way audio, two more loopback ports carry the camera-mic ingest and
+  // the talker-mic egress as Opus RTP. ffmpeg mixes both into a single AAC
+  // track muxed alongside the H.264 video. If the audio bridges aren't up at
+  // recording-start (camera not activated yet), we fall back to video-only.
+  //
   // Bind a temporary recv socket to grab a free ephemeral port, then close it
   // so ffmpeg can bind the same port. The narrow race window (port could be
   // grabbed by another process) is acceptable in this single-machine
   // deployment.
-  const probeSocket = createSocket('udp4');
-  await new Promise<void>((resolve, reject) => {
-    probeSocket.once('error', reject);
-    probeSocket.bind(0, '127.0.0.1', () => {
-      probeSocket.removeListener('error', reject);
-      resolve();
+  const allocatePort = async (): Promise<number> => {
+    const probe = createSocket('udp4');
+    await new Promise<void>((resolve, reject) => {
+      probe.once('error', reject);
+      probe.bind(0, '127.0.0.1', () => {
+        probe.removeListener('error', reject);
+        resolve();
+      });
     });
-  });
-  const loopbackPort = (probeSocket.address() as { port: number }).port;
-  probeSocket.close();
+    const port = (probe.address() as { port: number }).port;
+    probe.close();
+    return port;
+  };
+  const loopbackPort = await allocatePort();
+  const audioIngestAvailable = isCameraAudioIngestRunning(cameraId);
+  const audioEgressAvailable = isCameraAudioEgressRunning(cameraId);
+  const audioIngestLoopbackPort = audioIngestAvailable ? await allocatePort() : null;
+  const audioEgressLoopbackPort = audioEgressAvailable ? await allocatePort() : null;
 
-  const sdpContent = [
+  const sdpLines = [
     'v=0',
     'o=- 0 0 IN IP4 127.0.0.1',
     's=Camera Recording',
@@ -234,8 +255,23 @@ const startRecording = async (params: {
     `m=video ${String(loopbackPort)} RTP/AVP 96`,
     'a=rtpmap:96 H264/90000',
     'a=fmtp:96 packetization-mode=1',
-    '',
-  ].join('\n');
+  ];
+  if (audioIngestLoopbackPort !== null) {
+    sdpLines.push(
+      `m=audio ${String(audioIngestLoopbackPort)} RTP/AVP 111`,
+      'a=rtpmap:111 opus/48000/2',
+      'a=fmtp:111 minptime=10;useinbandfec=1',
+    );
+  }
+  if (audioEgressLoopbackPort !== null) {
+    sdpLines.push(
+      `m=audio ${String(audioEgressLoopbackPort)} RTP/AVP 111`,
+      'a=rtpmap:111 opus/48000/2',
+      'a=fmtp:111 minptime=10;useinbandfec=1',
+    );
+  }
+  sdpLines.push('');
+  const sdpContent = sdpLines.join('\n');
 
   const sdpPath = path.join(os.tmpdir(), `recording-${recording.id}.sdp`);
   const [sdpWriteError] = await tryCatch(async () => writeFile(sdpPath, sdpContent, 'utf8'));
@@ -251,16 +287,49 @@ const startRecording = async (params: {
     return { status: 'error', errorCode: 'recording.startFailed' };
   }
 
-  const ffmpegArgs = [
+  const audioStreamCount =
+    (audioIngestLoopbackPort !== null ? 1 : 0) +
+    (audioEgressLoopbackPort !== null ? 1 : 0);
+
+  const ffmpegArgs: string[] = [
     '-loglevel', 'warning',
     '-protocol_whitelist', 'file,udp,rtp',
     '-f', 'sdp',
     '-i', sdpPath,
-    '-c', 'copy',
+  ];
+
+  if (audioStreamCount === 0) {
+    // No audio bridge available; record video-only with the original copy path.
+    ffmpegArgs.push('-c', 'copy');
+  } else if (audioStreamCount === 1) {
+    // Single audio direction (e.g. egress not yet wired). Encode that one to
+    // AAC and copy video.
+    ffmpegArgs.push(
+      '-map', '0:v:0',
+      '-c:v', 'copy',
+      '-map', '0:a:0',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+    );
+  } else {
+    // Both directions: amix into a single AAC track. duration=longest keeps
+    // recording for the full session even if one direction is silent.
+    ffmpegArgs.push(
+      '-filter_complex',
+      '[0:a:0][0:a:1]amix=inputs=2:duration=longest:dropout_transition=2[mix]',
+      '-map', '0:v:0',
+      '-c:v', 'copy',
+      '-map', '[mix]',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+    );
+  }
+
+  ffmpegArgs.push(
     '-movflags', '+faststart+frag_keyframe+empty_moov',
     '-f', 'mp4',
     filePath,
-  ];
+  );
 
   let ffmpegProcess: ChildProcessWithoutNullStreams;
   try {
@@ -287,13 +356,12 @@ const startRecording = async (params: {
     }
   });
 
-  // Push RTP packets to ffmpeg via a fresh send-only loopback socket. The
-  // recv-side socket above was just used to grab a free port number.
+  // Push RTP packets to ffmpeg via fresh send-only loopback sockets, one per
+  // input port (video + optional audio ingest + optional audio egress).
   const sendSocket = createSocket('udp4');
-  const writeRtp = (rtpBytes: Buffer): void => {
-    sendSocket.send(rtpBytes, loopbackPort, '127.0.0.1', (sendError) => {
+  const writeRtp = (port: number, rtpBytes: Buffer): void => {
+    sendSocket.send(rtpBytes, port, '127.0.0.1', (sendError) => {
       if (sendError) {
-        // Logged but non-fatal — packet drops are the same as UDP wire loss.
         console.warn(`[recording] udp send failed for ${recording.id}: ${sendError.message}`);
       }
     });
@@ -304,11 +372,27 @@ const startRecording = async (params: {
     if (active) {
       active.lastRtpAt = Date.now();
     }
-    writeRtp(rtpBytes);
+    writeRtp(loopbackPort, rtpBytes);
   });
+
+  const unsubscribeAudioIngestFromBridge =
+    audioIngestLoopbackPort !== null
+      ? subscribeAudioIngestRtp(cameraId, (rtpBytes) => {
+          writeRtp(audioIngestLoopbackPort, rtpBytes);
+        })
+      : null;
+
+  const unsubscribeAudioEgressFromBridge =
+    audioEgressLoopbackPort !== null
+      ? subscribeAudioEgressRtp(cameraId, (rtpBytes) => {
+          writeRtp(audioEgressLoopbackPort, rtpBytes);
+        })
+      : null;
 
   const unsubscribeRtp = (): void => {
     unsubscribeRtpFromBridge();
+    if (unsubscribeAudioIngestFromBridge) unsubscribeAudioIngestFromBridge();
+    if (unsubscribeAudioEgressFromBridge) unsubscribeAudioEgressFromBridge();
     try {
       sendSocket.close();
     } catch {
@@ -338,6 +422,8 @@ const startRecording = async (params: {
     startedByUserId: userId,
     ffmpeg: ffmpegProcess,
     unsubscribeRtp,
+    unsubscribeAudioIngest: unsubscribeAudioIngestFromBridge,
+    unsubscribeAudioEgress: unsubscribeAudioEgressFromBridge,
     expirationTimer,
     noRtpTimer,
     lastRtpAt: null,
