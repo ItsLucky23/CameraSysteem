@@ -111,6 +111,16 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 self._ir_device = None
 
 
+        # SG90 spec: 0.5ms (-90°) to 2.5ms (+90°), 20ms frame (50Hz). gpiozero's
+        # defaults (1ms/2ms) only sweep half the SG90's physical range, which
+        # makes it look like the servo is "stuck" because button clicks at
+        # PTZ_STEP=5° produce barely-perceptible motion AND the servo can't
+        # reach its end-stops. Use SG90-correct widths so a full -90..+90
+        # sweep actually corresponds to the full mechanical range.
+        sg90_min_pw = 0.5 / 1000
+        sg90_max_pw = 2.5 / 1000
+        sg90_frame = 20 / 1000
+
         if self._pan_servo_gpio_pin is not None:
             try:
                 self._pan_servo = AngularServo(
@@ -118,8 +128,13 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                     min_angle=-90,
                     max_angle=90,
                     initial_angle=0,
+                    min_pulse_width=sg90_min_pw,
+                    max_pulse_width=sg90_max_pw,
+                    frame_width=sg90_frame,
                 )
-                logger.info("Pan SG90 servo initialized on GPIO %s", self._pan_servo_gpio_pin)
+                logger.info("Pan SG90 servo initialized on GPIO %s (pulse %s-%sms @ %sHz)",
+                            self._pan_servo_gpio_pin,
+                            sg90_min_pw * 1000, sg90_max_pw * 1000, 1 / sg90_frame)
             except Exception as error:  # noqa: BLE001
                 logger.warning("Failed to initialize pan SG90 servo: %s", error)
                 self._pan_servo = None
@@ -131,8 +146,13 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                     min_angle=-90,
                     max_angle=90,
                     initial_angle=0,
+                    min_pulse_width=sg90_min_pw,
+                    max_pulse_width=sg90_max_pw,
+                    frame_width=sg90_frame,
                 )
-                logger.info("Tilt SG90 servo initialized on GPIO %s", self._tilt_servo_gpio_pin)
+                logger.info("Tilt SG90 servo initialized on GPIO %s (pulse %s-%sms @ %sHz)",
+                            self._tilt_servo_gpio_pin,
+                            sg90_min_pw * 1000, sg90_max_pw * 1000, 1 / sg90_frame)
             except Exception as error:  # noqa: BLE001
                 logger.warning("Failed to initialize tilt SG90 servo: %s", error)
                 self._tilt_servo = None
@@ -216,11 +236,20 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
     async def pan(self, delta: int) -> None:
         pan_min = -90 if self._pan_servo is not None else -180
         pan_max = 90 if self._pan_servo is not None else 180
+        previous = self._state.pan
         self._state.pan = _clamp(self._state.pan + delta, pan_min, pan_max)
+        # Always log pan/tilt. They're rare (hold-to-move tops out at 5Hz) and
+        # we need to see whether the command actually reached the adapter when
+        # diagnosing dead servo buttons.
+        logger.info("[ptz] pan delta=%s previous=%s new=%s servo_attached=%s",
+                    delta, previous, self._state.pan, self._pan_servo is not None)
         self._set_servo_angle(self._pan_servo, self._state.pan)
 
     async def tilt(self, delta: int) -> None:
+        previous = self._state.tilt
         self._state.tilt = _clamp(self._state.tilt + delta, -90, 90)
+        logger.info("[ptz] tilt delta=%s previous=%s new=%s servo_attached=%s",
+                    delta, previous, self._state.tilt, self._tilt_servo is not None)
         self._set_servo_angle(self._tilt_servo, self._state.tilt)
 
     async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:

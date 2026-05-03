@@ -42,6 +42,15 @@ const SOI_HIGH = 0xff;
 const SOI_LOW = 0xd8;
 const EOI_LOW = 0xd9;
 
+// Hard ceiling on how often we emit a thumbnail to subscribers. ffmpeg's fps
+// filter is supposed to throttle to 1/THUMBNAIL_INTERVAL_SEC, but it relies
+// on input timestamps; with the "Timestamps are unset in a packet" warning
+// we sometimes see, ffmpeg can emit frames much faster than intended. This
+// floor guarantees we never blast the sync rooms even if upstream throttling
+// fails. Set just under the lowest sane interval (1s) so a healthy stream
+// still passes through.
+const MIN_EMIT_INTERVAL_MS = 750;
+
 interface ExtractorState {
   cameraId: string;
   ffmpeg: ChildProcessByStdio<null, Readable, Readable>;
@@ -66,6 +75,10 @@ interface ExtractorSingleton {
   // Per-camera pending restart timers so we don't stack multiple delayed
   // restarts if exit() fires twice in quick succession.
   restartTimers: Map<string, ReturnType<typeof globalThis.setTimeout>>;
+  // Per-camera timestamp of the most recent emitted thumbnail. Used to
+  // throttle handleJpegFrame so a misbehaving ffmpeg can't blast the sync
+  // rooms (and the auto-IR controller) faster than MIN_EMIT_INTERVAL_MS.
+  lastEmitAt: Map<string, number>;
 }
 
 const SINGLETON_KEY = '__luckyStackCameraThumbnailExtractorState__';
@@ -78,6 +91,7 @@ const state: ExtractorSingleton = scope[SINGLETON_KEY] ?? {
   extractors: new Map<string, ExtractorState>(),
   restartAttempts: new Map<string, number[]>(),
   restartTimers: new Map<string, ReturnType<typeof globalThis.setTimeout>>(),
+  lastEmitAt: new Map<string, number>(),
 };
 
 // Backfill on HMR (existing singleton from before these maps were added).
@@ -86,6 +100,9 @@ if (!state.restartAttempts) {
 }
 if (!state.restartTimers) {
   state.restartTimers = new Map<string, ReturnType<typeof globalThis.setTimeout>>();
+}
+if (!state.lastEmitAt) {
+  state.lastEmitAt = new Map<string, number>();
 }
 
 if (!scope[SINGLETON_KEY]) {
@@ -126,6 +143,15 @@ const scheduleRestart = (cameraId: string): void => {
 };
 
 const handleJpegFrame = (cameraId: string, jpegBytes: Buffer): void => {
+  // Hard ceiling on emit rate — see MIN_EMIT_INTERVAL_MS comment. Drops
+  // frames silently if we're below the floor (no log spam, no sync flood).
+  const now = Date.now();
+  const last = state.lastEmitAt.get(cameraId);
+  if (last !== undefined && now - last < MIN_EMIT_INTERVAL_MS) {
+    return;
+  }
+  state.lastEmitAt.set(cameraId, now);
+
   // Healthy frame arrived — reset the restart-attempt history so a future
   // hiccup gets the full 10-retry budget instead of inheriting old failures.
   state.restartAttempts.delete(cameraId);
@@ -392,6 +418,7 @@ const stop = async (cameraId: string): Promise<void> => {
     state.restartTimers.delete(cameraId);
   }
   state.restartAttempts.delete(cameraId);
+  state.lastEmitAt.delete(cameraId);
 
   const extractor = state.extractors.get(cameraId);
   if (!extractor) return;
