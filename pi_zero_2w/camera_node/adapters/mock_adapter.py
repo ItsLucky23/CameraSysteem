@@ -70,6 +70,16 @@ class MockHardwareAdapter(HardwareAdapter):
         await asyncio.sleep(0)
         self._state.tilt = _clamp(self._state.tilt + delta, -90, 90)
 
+    async def start_pan_continuous(self, *, direction: str) -> None:
+        await asyncio.sleep(0)
+        # Mock just records intent; no real servo to drive. UI shows pan
+        # state from telemetry which doesn't change until stop is called.
+        self._state.pan = -180 if direction == "left" else 180
+
+    async def stop_pan_continuous(self) -> None:
+        await asyncio.sleep(0)
+        self._state.pan = 0
+
     async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
         await asyncio.sleep(0)
         self._state.ir_mode = mode

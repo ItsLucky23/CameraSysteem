@@ -47,6 +47,12 @@ class CommandExecutor:
                 await self._adapter.tilt(self._ptz_step)
             elif command.action == "tiltDown":
                 await self._adapter.tilt(-self._ptz_step)
+            elif command.action == "panStartLeft":
+                await self._adapter.start_pan_continuous(direction="left")
+            elif command.action == "panStartRight":
+                await self._adapter.start_pan_continuous(direction="right")
+            elif command.action == "panStop":
+                await self._adapter.stop_pan_continuous()
             elif command.action == "irOn":
                 strength = _parse_strength(command.payload, default_when_missing=100)
                 if strength is None:

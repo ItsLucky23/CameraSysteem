@@ -20,11 +20,24 @@ class HardwareAdapter(ABC):
 
     @abstractmethod
     async def pan(self, delta: int) -> None:
-        """Move camera pan axis by delta."""
+        """Move camera pan axis by delta. Positional servos only."""
 
     @abstractmethod
     async def tilt(self, delta: int) -> None:
-        """Move camera tilt axis by delta."""
+        """Move camera tilt axis by delta. Positional servos only."""
+
+    @abstractmethod
+    async def start_pan_continuous(self, *, direction: str) -> None:
+        """Start spinning the pan servo continuously.
+
+        direction: 'left' or 'right'. Used with continuous-rotation servos
+        where pulse width selects speed + direction (not absolute angle).
+        Pair with stop_pan_continuous() to stop.
+        """
+
+    @abstractmethod
+    async def stop_pan_continuous(self) -> None:
+        """Stop the continuous-rotation pan servo (1.5ms neutral pulse)."""
 
     @abstractmethod
     async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:

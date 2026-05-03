@@ -111,14 +111,15 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
                 self._ir_device = None
 
 
-        # SG90 spec: 0.5ms (-90°) to 2.5ms (+90°), 20ms frame (50Hz). gpiozero's
-        # defaults (1ms/2ms) only sweep half the SG90's physical range, which
-        # makes it look like the servo is "stuck" because button clicks at
-        # PTZ_STEP=5° produce barely-perceptible motion AND the servo can't
-        # reach its end-stops. Use SG90-correct widths so a full -90..+90
-        # sweep actually corresponds to the full mechanical range.
-        sg90_min_pw = 0.5 / 1000
-        sg90_max_pw = 2.5 / 1000
+        # Continuous-rotation servo spec used by the project hardware:
+        #   1.0ms = full reverse, 1.5ms = stop, 2.0ms = full forward
+        # Narrower than the standard SG90 0.5-2.5ms range so the controller
+        # never sees pulses outside what it expects. Note: with a
+        # CONTINUOUS-rotation servo, "angle" maps to SPEED + DIRECTION, not
+        # to a position. The pan(delta) flow in this adapter still treats
+        # it as positional and is being reworked separately.
+        sg90_min_pw = 1.0 / 1000
+        sg90_max_pw = 2.0 / 1000
         sg90_frame = 20 / 1000
 
         if self._pan_servo_gpio_pin is not None:
@@ -251,6 +252,25 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         logger.info("[ptz] tilt delta=%s previous=%s new=%s servo_attached=%s",
                     delta, previous, self._state.tilt, self._tilt_servo is not None)
         self._set_servo_angle(self._tilt_servo, self._state.tilt)
+
+    async def start_pan_continuous(self, *, direction: str) -> None:
+        # Continuous-rotation servo: angle maps to speed + direction.
+        # +90 (= 2.0ms pulse) = full forward, -90 (= 1.0ms pulse) = full
+        # reverse. Hold until stop_pan_continuous() is called.
+        if self._pan_servo is None:
+            logger.warning("[ptz] start_pan_continuous direction=%s — no pan servo attached", direction)
+            return
+        target_angle = 90 if direction == "right" else -90
+        logger.info("[ptz] start_pan_continuous direction=%s -> servo angle=%s",
+                    direction, target_angle)
+        self._set_servo_angle(self._pan_servo, target_angle)
+
+    async def stop_pan_continuous(self) -> None:
+        if self._pan_servo is None:
+            logger.warning("[ptz] stop_pan_continuous — no pan servo attached")
+            return
+        logger.info("[ptz] stop_pan_continuous -> servo angle=0 (1.5ms neutral)")
+        self._set_servo_angle(self._pan_servo, 0)
 
     async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
         previous_mode = self._state.ir_mode

@@ -76,6 +76,9 @@ class NodeSettings:
     # MOTION DETECTION LOGIC (end)
     recording_start_command: str | None
     recording_stop_command: str | None
+    audio_input_device: str | None
+    audio_output_device: str | None
+    audio_bitrate_bps: int
 
 
 def _parse_optional_int(value: str | None) -> int | None:
@@ -143,6 +146,9 @@ def load_settings() -> NodeSettings:
         # MOTION DETECTION LOGIC (end)
         recording_start_command=(os.getenv("RECORDING_START_COMMAND") or "").strip() or None,
         recording_stop_command=(os.getenv("RECORDING_STOP_COMMAND") or "").strip() or None,
+        audio_input_device=(os.getenv("AUDIO_INPUT_DEVICE") or "").strip() or None,
+        audio_output_device=(os.getenv("AUDIO_OUTPUT_DEVICE") or "").strip() or None,
+        audio_bitrate_bps=max(8000, min(128000, _parse_int(os.getenv("AUDIO_BITRATE_BPS"), 32000))),
     )
 
     return settings

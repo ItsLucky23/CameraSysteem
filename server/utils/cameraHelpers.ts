@@ -11,6 +11,13 @@ export const CAMERA_ACTIONS = [
   'panRight',
   'tiltUp',
   'tiltDown',
+  // Continuous-rotation pan: press-and-hold UX. panStart{Left,Right} starts
+  // the servo spinning; panStop stops it. These are stubs (not in the
+  // CAMERA_ACTION Prisma enum) so they skip DB persistence and just get
+  // enqueued for the Pi Zero — see STUB_CAMERA_ACTIONS below.
+  'panStartLeft',
+  'panStartRight',
+  'panStop',
   'irOn',
   'irOff',
   'recordStart',
@@ -32,6 +39,11 @@ export const STUB_CAMERA_ACTIONS = [
   'zoomOut',
   'talkbackOn',
   'talkbackOff',
+  // Continuous-rotation pan commands — transient (start/stop pair), no
+  // value in persisting them to cameraCommand history.
+  'panStartLeft',
+  'panStartRight',
+  'panStop',
 ] as const;
 
 export type StubCameraAction = (typeof STUB_CAMERA_ACTIONS)[number];
