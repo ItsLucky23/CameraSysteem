@@ -45,6 +45,7 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         audio_input_device: str | None = None,
         audio_output_device: str | None = None,
         audio_bitrate_bps: int = 32000,
+        pan_servo_neutral_angle_offset: float = 0.0,
     ) -> None:
         self._ir_gpio_pin = ir_gpio_pin
         self._pan_servo_gpio_pin = pan_servo_gpio_pin
@@ -57,6 +58,14 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._audio_input_device = audio_input_device
         self._audio_output_device = audio_output_device
         self._audio_bitrate_bps = audio_bitrate_bps
+        # Continuous-rotation servo neutral compensation: many cheap CR-SG90s
+        # don't actually stop at exactly 1.5ms. The user runs
+        # calibrate_pan_servo.py --software to find the angle that does stop
+        # their specific servo, then sets PAN_SERVO_NEUTRAL_ANGLE_OFFSET in
+        # .env. We add this offset whenever we command STOP so the adapter
+        # produces the pulse width the SERVO interprets as stop, not what the
+        # spec sheet says is stop.
+        self._pan_servo_neutral_angle_offset = pan_servo_neutral_angle_offset
 
         self._ir_device = None
         self._pan_servo = None
@@ -133,18 +142,25 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
 
         if self._pan_servo_gpio_pin is not None:
             try:
+                # Seed at the calibrated neutral so a continuous-rotation
+                # servo doesn't creep during the time between adapter init
+                # and the first user command. With offset=0 (default) this
+                # is just 1.5ms, same as before.
                 self._pan_servo = AngularServo(
                     self._pan_servo_gpio_pin,
                     min_angle=-90,
                     max_angle=90,
-                    initial_angle=0,
+                    initial_angle=self._pan_servo_neutral_angle_offset,
                     min_pulse_width=sg90_min_pw,
                     max_pulse_width=sg90_max_pw,
                     frame_width=sg90_frame,
                 )
-                logger.info("Pan SG90 servo initialized on GPIO %s (pulse %s-%sms @ %sHz)",
-                            self._pan_servo_gpio_pin,
-                            sg90_min_pw * 1000, sg90_max_pw * 1000, 1 / sg90_frame)
+                logger.info(
+                    "Pan SG90 servo initialized on GPIO %s (pulse %s-%sms @ %sHz, neutral_offset=%s°)",
+                    self._pan_servo_gpio_pin,
+                    sg90_min_pw * 1000, sg90_max_pw * 1000, 1 / sg90_frame,
+                    self._pan_servo_neutral_angle_offset,
+                )
             except Exception as error:  # noqa: BLE001
                 logger.warning("Failed to initialize pan SG90 servo: %s", error)
                 self._pan_servo = None
@@ -280,8 +296,13 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         if self._pan_servo is None:
             logger.warning("[ptz] stop_pan_continuous — no pan servo attached")
             return
-        logger.info("[ptz] stop_pan_continuous -> servo angle=0 (1.5ms neutral)")
-        self._set_servo_angle(self._pan_servo, 0)
+        # Continuous-rotation neutral compensation: a perfectly-calibrated
+        # servo stops at angle=0 (1.5ms pulse). A real cheap one needs a few
+        # tenths of a degree offset — see calibrate_pan_servo.py.
+        stop_angle = self._pan_servo_neutral_angle_offset
+        logger.info("[ptz] stop_pan_continuous -> servo angle=%s (1.5ms + offset %s)",
+                    stop_angle, self._pan_servo_neutral_angle_offset)
+        self._set_servo_angle(self._pan_servo, stop_angle)
 
     async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
         previous_mode = self._state.ir_mode

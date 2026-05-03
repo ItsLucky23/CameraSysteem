@@ -71,6 +71,11 @@ class NodeSettings:
     ir_boot_self_test: bool
     pan_servo_gpio_pin: int | None
     tilt_servo_gpio_pin: int | None
+    # Continuous-rotation servos rarely have a true 1.5ms neutral out of the
+    # factory. If your servo creeps when commanded to STOP, run
+    # calibrate_pan_servo.py --software to find the offset that holds it
+    # still, then set this. Range: -10..+10 degrees.
+    pan_servo_neutral_angle_offset: float
     # MOTION DETECTION LOGIC (start)
     # motion_gpio_pin: int | None
     # MOTION DETECTION LOGIC (end)
@@ -141,6 +146,10 @@ def load_settings() -> NodeSettings:
         ir_boot_self_test=_parse_bool(os.getenv("IR_BOOT_SELF_TEST"), False),
         pan_servo_gpio_pin=_parse_optional_int(os.getenv("PAN_SERVO_GPIO_PIN")),
         tilt_servo_gpio_pin=_parse_optional_int(os.getenv("TILT_SERVO_GPIO_PIN")),
+        pan_servo_neutral_angle_offset=max(
+            -10.0,
+            min(10.0, _parse_float(os.getenv("PAN_SERVO_NEUTRAL_ANGLE_OFFSET"), 0.0)),
+        ),
         # MOTION DETECTION LOGIC (start)
         # motion_gpio_pin=_parse_optional_int(os.getenv("MOTION_GPIO_PIN")),
         # MOTION DETECTION LOGIC (end)

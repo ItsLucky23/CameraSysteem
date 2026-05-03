@@ -32,6 +32,7 @@ def build_adapter(settings: NodeSettings):
             audio_input_device=settings.audio_input_device,
             audio_output_device=settings.audio_output_device,
             audio_bitrate_bps=settings.audio_bitrate_bps,
+            pan_servo_neutral_angle_offset=settings.pan_servo_neutral_angle_offset,
         )
 
     raise ValueError(f"Unknown HARDWARE_ADAPTER value: {settings.adapter}")
