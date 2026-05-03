@@ -186,10 +186,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   const seededRecordingForCameraIdRef = useRef<string | null>(null);
   const [recordingPending, setRecordingPending] = useState<'start' | 'stop' | null>(null);
 
-  // While the user drags the IR strength slider we render the draft value to
-  // avoid the slider snapping back to the server-acknowledged value mid-drag.
-  // Cleared once a sync event echoes a matching irStrength.
-  const [irStrengthDraft, setIrStrengthDraft] = useState<number | null>(null);
+  // HARDWARE IR SENSOR DELEGATION (start) — slider hidden in UI, this state and its
+  // setIRStrength callback are unused. Kept (with _ prefix to satisfy noUnusedLocals)
+  // so a future revert just needs to remove the prefix.
+  const [_irStrengthDraft, setIrStrengthDraft] = useState<number | null>(null);
+  // HARDWARE IR SENSOR DELEGATION (end)
 
   // Admin-only per-camera debug logging flags. Map of cameraId -> Set of
   // active feature names. Hydrated lazily on camera select; updated via the
@@ -608,12 +609,15 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     if (response.status === 'error') notify.error({ key: response.errorCode });
   }, [selectedCameraId]);
 
+  // HARDWARE IR SENSOR DELEGATION (start) — slider hidden in UI; setIRStrength
+  // and its debounce ref are unused. Kept for easy revert (uncomment the slider
+  // JSX in the IR section to restore).
+  const irStrengthCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Trailing-edge debounce on the slider commit: when the user nudges the
   // slider repeatedly, only the most recent value lands in the API call. The
   // server-side coalescing in cameraNode.enqueueCommand handles the multi-tab
   // case; this just keeps the network quiet for one user holding the slider.
-  const irStrengthCommitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const setIRStrength = useCallback((strength: number) => {
+  const _setIRStrength = useCallback((strength: number) => {
     if (!selectedCameraId) return;
     setIrStrengthDraft(strength);
     if (irStrengthCommitTimeoutRef.current) {
@@ -638,6 +642,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
       })();
     }, 250);
   }, [selectedCameraId]);
+  void _setIRStrength; // satisfies noUnusedLocals; remove when restoring slider
+  // HARDWARE IR SENSOR DELEGATION (end)
 
   useEffect(() => {
     return () => {
@@ -1051,8 +1057,11 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
   }
 
   const currentIRMode = cameraState?.irMode ?? selectedCamera?.irMode ?? 'auto';
-  const currentIRStrength = cameraState?.irStrength ?? selectedCamera?.irStrength ?? 100;
-  const currentIRActiveStrength = cameraState?.irActiveStrength ?? null;
+  // HARDWARE IR SENSOR DELEGATION (start) — slider hidden; these only fed it
+  const _currentIRStrength = cameraState?.irStrength ?? selectedCamera?.irStrength ?? 100;
+  const _currentIRActiveStrength = cameraState?.irActiveStrength ?? null;
+  void _currentIRStrength; void _currentIRActiveStrength; // satisfy noUnusedLocals
+  // HARDWARE IR SENSOR DELEGATION (end)
 
   const previewActionLabel = useMemo(() => {
     if (previewActive || previewStarting) {
@@ -1438,7 +1447,9 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                   <div className="flex gap-1 rounded-[10px] bg-container2 p-0.5">
                     {[
                       { mode: 'off' as const, label: translate({ key: 'aperture.monitor.irOff' }) },
-                      { mode: 'auto' as const, label: translate({ key: 'aperture.monitor.irAuto' }) },
+                      // HARDWARE IR SENSOR DELEGATION (start) — Auto is now driven by the ring's onboard CdS sensor; uncomment to restore software auto-IR
+                      // { mode: 'auto' as const, label: translate({ key: 'aperture.monitor.irAuto' }) },
+                      // HARDWARE IR SENSOR DELEGATION (end)
                       { mode: 'on' as const, label: translate({ key: 'aperture.monitor.irOn' }) },
                     ].map((option) => {
                       const active = currentIRMode === option.mode;
@@ -1455,7 +1466,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                       );
                     })}
                   </div>
-                  {currentIRMode !== 'off' && (() => {
+                  {/* HARDWARE IR SENSOR DELEGATION (start) — slider hidden because the ring's CdS sensor controls actual brightness; we have no electrical path to read it. Uncomment to restore the software-controlled slider. */}
+                  {/* {currentIRMode !== 'off' && (() => {
                     // 'on' mode: user controls strength via the slider directly.
                     // 'auto' mode: slider mirrors the auto controller's live value
                     //              (irActiveStrength from telemetry) and is read-only.
@@ -1498,7 +1510,8 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                         />
                       </div>
                     );
-                  })()}
+                  })()} */}
+                  {/* HARDWARE IR SENSOR DELEGATION (end) */}
                 </section>
 
                 <section className="rounded-2xl border border-container1-border bg-container1 p-4">

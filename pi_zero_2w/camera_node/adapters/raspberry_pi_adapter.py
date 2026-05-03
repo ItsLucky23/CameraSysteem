@@ -229,70 +229,101 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         if is_log_enabled("ir") and previous_mode != mode:
             logger.info("[ir] mode change %s -> %s (strength_arg=%s)", previous_mode, mode, strength)
 
-        if mode == "on":
-            if strength is not None:
-                self._ir_strength = _clamp(strength, 0, 100)
-                self._state.ir_strength = self._ir_strength
-            self._apply_ir_pwm(self._ir_strength)
-            self._state.ir_enabled = self._ir_strength > 0
+        # HARDWARE IR SENSOR DELEGATION (start)
+        # The IR ring's onboard CdS photoresistor handles auto on/off in
+        # hardware. We just supply full power for "on"/"auto" (the ring's
+        # sensor decides the actual brightness) and zero for "off".
+        # 'auto' is treated as 'on' so legacy DB rows still light the ring.
+        # The strength arg is ignored on purpose — the ring decides.
+        if mode == "on" or mode == "auto":
+            self._apply_ir_pwm(100)
+            self._state.ir_enabled = True
             return
-
         if mode == "off":
             self._apply_ir_pwm(0)
             self._state.ir_enabled = False
             return
+        # HARDWARE IR SENSOR DELEGATION (end)
 
-        if mode == "auto":
-            # Auto decisions are made on the Pi 5 (cameraIRController). Until
-            # the next irSetStrength arrives, keep whatever the LED was last
-            # at so the user doesn't see a flash to 0 then back up.
-            if is_log_enabled("ir"):
-                logger.info("[ir] mode=auto — awaiting Pi 5 irSetStrength (current=%s)", self._ir_active_strength)
-            return
+        # Original software-driven behavior preserved below for easy revert:
+        # if mode == "on":
+        #     if strength is not None:
+        #         self._ir_strength = _clamp(strength, 0, 100)
+        #         self._state.ir_strength = self._ir_strength
+        #     self._apply_ir_pwm(self._ir_strength)
+        #     self._state.ir_enabled = self._ir_strength > 0
+        #     return
+        #
+        # if mode == "off":
+        #     self._apply_ir_pwm(0)
+        #     self._state.ir_enabled = False
+        #     return
+        #
+        # if mode == "auto":
+        #     # Auto decisions are made on the Pi 5 (cameraIRController). Until
+        #     # the next irSetStrength arrives, keep whatever the LED was last
+        #     # at so the user doesn't see a flash to 0 then back up.
+        #     if is_log_enabled("ir"):
+        #         logger.info("[ir] mode=auto — awaiting Pi 5 irSetStrength (current=%s)", self._ir_active_strength)
+        #     return
 
     async def set_ir_strength(self, strength: int, *, source: str) -> None:
-        clamped = _clamp(strength, 0, 100)
-        is_system = source.startswith("system:")
+        # HARDWARE IR SENSOR DELEGATION (start)
+        # Brightness is governed entirely by the ring's onboard CdS sensor,
+        # so we no-op all incoming strength commands. Defensive belt: nothing
+        # upstream should be enqueuing irSetStrength anymore (Pi 5 controller
+        # is silenced), but if something slips through we stay quiet.
         if is_log_enabled("ir"):
             logger.info(
-                "[ir] set_ir_strength input=%s clamped=%s mode=%s source=%s",
-                strength, clamped, self._state.ir_mode, source,
+                "[ir] set_ir_strength delegated to ring CdS sensor — no-op (input=%s source=%s)",
+                strength, source,
             )
-        if self._state.ir_mode == "on":
-            if is_system:
-                # Auto-controller command arrived while user is in manual ON
-                # mode — likely a stale enqueue from before the mode flip,
-                # OR a controller firing despite the gate. Either way we must
-                # NOT apply it, otherwise the LED brightness drifts based on
-                # scene luminance even though the user picked a fixed value.
-                if is_log_enabled("ir"):
-                    logger.info("[ir] set_ir_strength ignored — mode=on but source=system")
-                return
-            # User slider drag: this is the operator's persisted manual value.
-            self._ir_strength = clamped
-            self._state.ir_strength = self._ir_strength
-            self._apply_ir_pwm(clamped)
-            self._state.ir_enabled = clamped > 0
-            return
-        if self._state.ir_mode == "auto":
-            if not is_system:
-                # User slider drag arrived while in auto mode — the slider
-                # is meant to be disabled in the UI when in auto, so this
-                # is either a race or a stale command. Don't let it hijack
-                # the auto controller's value.
-                if is_log_enabled("ir"):
-                    logger.info("[ir] set_ir_strength ignored — mode=auto but source=user")
-                return
-            # Pi 5 auto controller drove this — apply to the LED but do NOT
-            # touch self._ir_strength (that holds the operator's last manual
-            # value, restored when the user flips Auto -> On).
-            self._apply_ir_pwm(clamped)
-            self._state.ir_enabled = clamped > 0
-            return
-        # mode == "off": user explicitly disabled IR; ignore stray strength
-        # commands so an in-flight auto-IR write can't relight the LED.
-        if is_log_enabled("ir"):
-            logger.info("[ir] set_ir_strength ignored — mode=off")
+        return
+        # HARDWARE IR SENSOR DELEGATION (end)
+
+        # Original software-driven behavior preserved below for easy revert:
+        # clamped = _clamp(strength, 0, 100)
+        # is_system = source.startswith("system:")
+        # if is_log_enabled("ir"):
+        #     logger.info(
+        #         "[ir] set_ir_strength input=%s clamped=%s mode=%s source=%s",
+        #         strength, clamped, self._state.ir_mode, source,
+        #     )
+        # if self._state.ir_mode == "on":
+        #     if is_system:
+        #         # Auto-controller command arrived while user is in manual ON
+        #         # mode — likely a stale enqueue from before the mode flip,
+        #         # OR a controller firing despite the gate. Either way we must
+        #         # NOT apply it, otherwise the LED brightness drifts based on
+        #         # scene luminance even though the user picked a fixed value.
+        #         if is_log_enabled("ir"):
+        #             logger.info("[ir] set_ir_strength ignored — mode=on but source=system")
+        #         return
+        #     # User slider drag: this is the operator's persisted manual value.
+        #     self._ir_strength = clamped
+        #     self._state.ir_strength = self._ir_strength
+        #     self._apply_ir_pwm(clamped)
+        #     self._state.ir_enabled = clamped > 0
+        #     return
+        # if self._state.ir_mode == "auto":
+        #     if not is_system:
+        #         # User slider drag arrived while in auto mode — the slider
+        #         # is meant to be disabled in the UI when in auto, so this
+        #         # is either a race or a stale command. Don't let it hijack
+        #         # the auto controller's value.
+        #         if is_log_enabled("ir"):
+        #             logger.info("[ir] set_ir_strength ignored — mode=auto but source=user")
+        #         return
+        #     # Pi 5 auto controller drove this — apply to the LED but do NOT
+        #     # touch self._ir_strength (that holds the operator's last manual
+        #     # value, restored when the user flips Auto -> On).
+        #     self._apply_ir_pwm(clamped)
+        #     self._state.ir_enabled = clamped > 0
+        #     return
+        # # mode == "off": user explicitly disabled IR; ignore stray strength
+        # # commands so an in-flight auto-IR write can't relight the LED.
+        # if is_log_enabled("ir"):
+        #     logger.info("[ir] set_ir_strength ignored — mode=off")
 
     def _apply_ir_pwm(self, strength: int) -> None:
         clamped = _clamp(strength, 0, 100)

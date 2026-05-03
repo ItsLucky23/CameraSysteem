@@ -73,39 +73,58 @@ class MockHardwareAdapter(HardwareAdapter):
     async def set_ir_mode(self, mode: str, *, strength: int | None = None) -> None:
         await asyncio.sleep(0)
         self._state.ir_mode = mode
-        if mode == "on":
-            if strength is not None:
-                self._state.ir_strength = _clamp(strength, 0, 100)
-            self._state.ir_active_strength = self._state.ir_strength
-            self._state.ir_enabled = self._state.ir_strength > 0
-        elif mode == "off":
+        del strength  # unused — see HARDWARE IR SENSOR DELEGATION block below
+        # HARDWARE IR SENSOR DELEGATION (start) — mirror rpi adapter
+        if mode == "on" or mode == "auto":
+            self._state.ir_active_strength = 100
+            self._state.ir_enabled = True
+            return
+        if mode == "off":
             self._state.ir_active_strength = 0
             self._state.ir_enabled = False
-        elif mode == "auto":
-            # Mock can't read lux, so fake mid-level so the UI has something to show.
-            self._state.ir_active_strength = 50
-            self._state.ir_enabled = True
+            return
+        # HARDWARE IR SENSOR DELEGATION (end)
+
+        # Original software-driven behavior preserved below for easy revert:
+        # if mode == "on":
+        #     if strength is not None:
+        #         self._state.ir_strength = _clamp(strength, 0, 100)
+        #     self._state.ir_active_strength = self._state.ir_strength
+        #     self._state.ir_enabled = self._state.ir_strength > 0
+        # elif mode == "off":
+        #     self._state.ir_active_strength = 0
+        #     self._state.ir_enabled = False
+        # elif mode == "auto":
+        #     # Mock can't read lux, so fake mid-level so the UI has something to show.
+        #     self._state.ir_active_strength = 50
+        #     self._state.ir_enabled = True
 
     async def set_ir_strength(self, strength: int, *, source: str) -> None:
         await asyncio.sleep(0)
-        clamped = _clamp(strength, 0, 100)
-        is_system = source.startswith("system:")
-        if self._state.ir_mode == "on":
-            if is_system:
-                # Mirror the rpi adapter: don't let auto-controller commands
-                # affect the LED while in manual ON mode.
-                return
-            self._state.ir_strength = clamped
-            self._state.ir_active_strength = clamped
-            self._state.ir_enabled = clamped > 0
-            return
-        if self._state.ir_mode == "auto":
-            if not is_system:
-                return
-            self._state.ir_active_strength = clamped
-            self._state.ir_enabled = clamped > 0
-            return
-        # mode == "off": ignore stray strength commands
+        # HARDWARE IR SENSOR DELEGATION (start) — mirror rpi adapter no-op
+        del strength, source
+        return
+        # HARDWARE IR SENSOR DELEGATION (end)
+
+        # Original software-driven behavior preserved below for easy revert:
+        # clamped = _clamp(strength, 0, 100)
+        # is_system = source.startswith("system:")
+        # if self._state.ir_mode == "on":
+        #     if is_system:
+        #         # Mirror the rpi adapter: don't let auto-controller commands
+        #         # affect the LED while in manual ON mode.
+        #         return
+        #     self._state.ir_strength = clamped
+        #     self._state.ir_active_strength = clamped
+        #     self._state.ir_enabled = clamped > 0
+        #     return
+        # if self._state.ir_mode == "auto":
+        #     if not is_system:
+        #         return
+        #     self._state.ir_active_strength = clamped
+        #     self._state.ir_enabled = clamped > 0
+        #     return
+        # # mode == "off": ignore stray strength commands
 
     async def set_recording(self, recording: bool) -> None:
         await asyncio.sleep(0)

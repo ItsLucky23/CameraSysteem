@@ -77,6 +77,17 @@ Use this table for every jumper. **Physical pin** = the position on the 40-pin h
 | Red (+) | 12 V rail (e.g. the pins behind the DC jack on the HW-131 module) |
 | Black (–) | MOSFET Drain (pin 2) |
 
+> **Onboard CdS sensor:** the IR ring has its own photoresistor that gates the
+> LEDs based on ambient light, completely in hardware. Our software defers to
+> it: the Pi 5 auto-IR controller and Pi Zero PWM dimming are both commented
+> out behind `HARDWARE IR SENSOR DELEGATION (start)/(end)` markers. To revert
+> (use software auto-IR + IMX708 luminance instead), uncomment those marker
+> blocks in `server/utils/cameraIRController.ts`,
+> `pi_zero_2w/camera_node/adapters/raspberry_pi_adapter.py`,
+> `pi_zero_2w/camera_node/adapters/mock_adapter.py`, and `src/cameras/page.tsx`
+> — and place opaque tape over the CdS sensor on the ring so it doesn't
+> override us. UI mode buttons collapse to **On / Off**; Auto is hidden.
+
 ---
 
 ## 5. Safety & multimeter checklist
