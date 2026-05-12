@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
+
+# Force gpiozero to use the pigpio backend (DMA-driven, sub-microsecond PWM
+# precision) instead of the default lgpio software-PWM, which has tens of
+# microseconds of jitter on the Pi Zero 2W. Servos see jitter directly as
+# random position drift + hunting. Must be set before any gpiozero import.
+os.environ.setdefault("GPIOZERO_PIN_FACTORY", "pigpio")
 
 from camera_node.adapters import MockHardwareAdapter, RaspberryPiHardwareAdapter
 from camera_node.api_client import Pi5ApiClient

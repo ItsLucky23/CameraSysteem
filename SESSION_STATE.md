@@ -2,62 +2,186 @@
 
 ## Session summary
 
-- **Goal:** make IR auto mode actually work, expose its eval cadence as a dev-tunable env var, and continue the "On mode behaves like Auto" fix from the prior session.
-- **Pi 5 thumbnail extractor cadence is now env-configurable.**
-  - `server/utils/cameraThumbnailExtractor.ts:22-32` — `parseThumbnailIntervalSec()` reads `CAMERA_THUMBNAIL_INTERVAL_SEC` (default 30, clamped to [1, 600]).
-  - Startup log now prints the resolved value: `[thumbnail-extractor] start cameraId=... intervalSec=N` (`server/utils/cameraThumbnailExtractor.ts:280`).
-  - This single knob drives both thumbnail broadcast frequency and auto-IR re-evaluation cadence (auto-IR piggybacks on these JPEGs).
-- **Auto mode now responds immediately on mode switch.**
-  - `src/cameras/_api/setIRMode_v1.ts:5-7` imports `onThumbnailUpdated` and `getThumbnail`.
-  - After persisting + emitting + enqueueing `irAuto`, when `irModeValue === 'auto'` the API now fires `onThumbnailUpdated()` with the most recent cached JPEG so the LED settles to the lux-derived target in the same FIFO command batch as `irAuto`, rather than waiting up to one full extractor tick.
-- **Diagnosed the "stuck at 30s" symptom (not the env var, the fallback path).**
-  - There are two thumbnail paths: Pi 5 ffmpeg extractor (env-configurable) and Pi Zero `rpicam-jpeg` fallback (was hard-coded 30s).
-  - User's RTP stream failed to start at boot due to a camera-acquisition race ("Pipeline handler in use by another process"), so the Pi 5 extractor never started — Pi Zero's hard-coded 30s loop was the only thumbnail source.
-- **Pi Zero fallback cadence is now env-configurable too.**
-  - `pi_zero_2w/camera_node/config.py:63` — added `thumbnail_interval_sec: float` to `NodeSettings`.
-  - `pi_zero_2w/camera_node/config.py:127-131` — parses `THUMBNAIL_INTERVAL_SEC` env var, default 30, clamp [1, 600].
-  - `pi_zero_2w/camera_node/runtime.py:99` — passes `interval_sec=settings.thumbnail_interval_sec` to `ThumbnailPublisher`.
-  - `pi_zero_2w/camera_node/thumbnail_publisher.py:14, 22-49, 67` — `THUMBNAIL_INTERVAL_SEC` constant renamed to `DEFAULT_THUMBNAIL_INTERVAL_SEC`; constructor takes `interval_sec` arg; `asyncio.sleep` uses `self._interval_sec`.
-- **Env templates updated** (project rule #14):
-  - `.env_template` — added `CAMERA_THUMBNAIL_INTERVAL_SEC=30` with comment.
-  - `.env` — added `CAMERA_THUMBNAIL_INTERVAL_SEC=1` (dev value; user later auto-edited file).
-  - `pi_zero_2w/.env.example` — added `THUMBNAIL_INTERVAL_SEC=30` with comment.
-- **Build verification:** `npm run build` exits 0 (10.1mb dist/server.js, only pre-existing example-file warnings unrelated to changes).
-- **Issue flagged but NOT auto-fixed** (project rule #11): boot-time race between `rpicam-jpeg` (`pi_zero_2w/camera_node/thumbnail_publisher.py:63`, fires immediate capture on startup) and `rpicam-vid` (the video stream). Result: stream dies with returncode=234 and doesn't auto-recover until the next user-initiated `startVideoStream`. Two fix options presented to user, awaiting decision.
+- **Goal:** plan + implement end-to-end 2-way audio (camera mic <-> browser, with talker control-session lock and recording mux of both directions).
+- **Plan reviewed and approved:** stored at `C:\Users\mathi\.claude\plans\go-over-the-codebase-curried-crown.md`. Implements all 5 phases over the existing video stack (RTP/UDP Pi Zero -> Pi 5 -> WebRTC browser).
+- **All 5 phases implemented:**
+  - Phase 1 (docs/scaffold): `HARDWARE_SUMMARY.md` §6.A migration procedure, env vars `AUDIO_INPUT_DEVICE`/`AUDIO_OUTPUT_DEVICE`/`AUDIO_BITRATE_BPS` plumbed through `pi_zero_2w/.env.example` + `pi_zero_2w/camera_node/config.py`.
+  - Phase 2 (downlink — Pi mic to browser): `pi_zero_2w/camera_node/audio_publisher.py:1` (arecord+ffmpeg Opus -> RTP), `server/utils/cameraAudioBridge.ts:1` ingest half, audio transceiver added in `server/utils/cameraWebrtcBridge.ts` with `useOPUS({ payloadType: 111 })`, command actions `startAudioUplink`/`stopAudioUplink` in `pi_zero_2w/camera_node/command_executor.py`, orchestrator enqueues both audio commands alongside `startVideoStream` in `server/utils/cameraStreamOrchestrator.ts`.
+  - Phase 3 (uplink — browser mic to Pi speaker, control-gated): `pi_zero_2w/camera_node/audio_subscriber.py:1` (RTP -> ffmpeg -> aplay), egress half of `cameraAudioBridge.ts`, ontrack -> `writeAudioEgressRtp` wired in `cameraWebrtcBridge.ts`. Control gate via new `server/utils/cameraMicState.ts:1` (Redis lock with `CONTROL_TTL_MS` TTL), `src/cameras/_api/setMicEnabled_v1.ts:1`, sync handler `src/cameras/_sync/micEnabledChanged_server_v1.ts:1`. Browser side: audio transceiver + hidden `<audio autoplay>` element + mic toggle now calls `setMicEnabled` then `replaceTrack` on the existing audio sender (`src/cameras/page.tsx`).
+  - Phase 4 (recording mux): `server/utils/cameraRecordingManager.ts` allocates two extra UDP loopback ports, extends SDP to 3 streams, picks ffmpeg arg set (copy / `aac 128k` single / `amix=inputs=2:duration=longest:dropout_transition=2 -> aac 128k`).
+  - Phase 5 (polish): `audioPipeline` log flag added to both Pi 5 and Pi Zero log-flag stores + cameras-page debug panel; `aperture.monitor.audioMicHeldByOther` and `aperture.monitor.debugFeatureAudio` locale strings added in en/nl/de/fr; Pi 5 env vars `PI5_AUDIO_INGEST_PORT_BASE=6600` and `PI5_AUDIO_EGRESS_PORT_BASE=7600` added to `.env`/`.env_template`.
+- **Build verification:** `npm run build` exits 0, only pre-existing warnings, no new ones from the audio change.
+- **Python verification:** `python -m py_compile` passes cleanly on all changed Pi Zero files.
+- **NOT YET TESTED ON HARDWARE.** All audio changes are gated on `AUDIO_INPUT_DEVICE` / `AUDIO_OUTPUT_DEVICE` being set in the Pi Zero `.env`; until those are populated the audio commands log a no-op.
 
 ## Current state
 
-- **Working:**
-  - Build green on Pi 5.
-  - All Pi 5 + Pi Zero code changes are written and consistent across env files and templates.
-  - Auto IR controller (Pi 5 side) gates correctly on `camera.irMode === 'auto'`; immediate eval on mode switch is in place.
-  - Pi Zero adapter `set_ir_strength` is mode-aware (on=update+apply, auto=apply-only, off=ignore) — carried over from prior session.
-- **Not yet validated by user:**
-  - Whether `CAMERA_THUMBNAIL_INTERVAL_SEC=1` actually produces 1s ticks in their environment (last test was on stale code where the stream was dead, so the Pi 5 extractor never ran).
-  - Whether the new Pi Zero `THUMBNAIL_INTERVAL_SEC=1` makes auto IR responsive even when the stream is broken.
-- **Known broken (not yet fixed):**
-  - Boot-time camera-busy race between `rpicam-jpeg` and `rpicam-vid` on the Pi Zero. Symptom: video stream fails to start on first boot, recovers only after viewer leaves and reopens the cameras page. Diagnosis is solid; fix not chosen yet.
-- **Uncommitted changes (this session + carried over from prior session):**
-  - This session: `server/utils/cameraThumbnailExtractor.ts`, `src/cameras/_api/setIRMode_v1.ts`, `.env_template`, `.env`, `pi_zero_2w/camera_node/config.py`, `pi_zero_2w/camera_node/runtime.py`, `pi_zero_2w/camera_node/thumbnail_publisher.py`, `pi_zero_2w/.env.example`.
-  - Prior session, still uncommitted: `pi_zero_2w/camera_node/adapters/mock_adapter.py`, `pi_zero_2w/camera_node/adapters/raspberry_pi_adapter.py`, `pi_zero_2w/camera_node/command_executor.py`, `server/utils/cameraIRController.ts`, `server/utils/cameraIRController.ts`, `src/cameras/_api/setIRMode_v1.ts` (further edits this session).
+- **Working (verified by build/typecheck only):**
+  - Server build is green. TypeScript types include the new `setMicEnabled` API and `micEnabledChanged` sync event.
+  - Pi Zero Python files all `py_compile` clean.
+  - Existing video path is untouched at the message-shape level — the new audio transceiver was added to the same `RTCPeerConnection` and existing video clients should keep working.
+- **Implemented but unverified:**
+  - The full audio path Pi Zero mic -> browser speaker.
+  - The full audio path browser mic -> Pi Zero speaker.
+  - Control-session-gated mic ownership ("X is talking" indicator + non-owner mic toggle disabled).
+  - Recording with mixed audio (camera mic + browser mic interleaved into the AAC track of the MP4).
+- **Known broken (intentional):**
+  - Until the Pi Zero is rewired (IR LED off GPIO 18) AND `AUDIO_INPUT_DEVICE` is set, the audio commands no-op. This is by design — running `git pull` + restart on a non-rewired Pi Zero leaves IR working as before and skips audio cleanly.
+- **Uncommitted changes (this session, on `main`):**
+  - New files: `pi_zero_2w/camera_node/audio_publisher.py`, `pi_zero_2w/camera_node/audio_subscriber.py`, `server/utils/cameraAudioBridge.ts`, `server/utils/cameraMicState.ts`, `src/cameras/_api/setMicEnabled_v1.ts`, `src/cameras/_sync/micEnabledChanged_server_v1.ts`.
+  - Modified: `HARDWARE_SUMMARY.md`, `pi_zero_2w/.env.example`, `pi_zero_2w/camera_node/config.py`, `pi_zero_2w/camera_node/log_flags.py`, `pi_zero_2w/camera_node/adapters/base.py`, `pi_zero_2w/camera_node/adapters/raspberry_pi_adapter.py`, `pi_zero_2w/camera_node/adapters/mock_adapter.py`, `pi_zero_2w/camera_node/command_executor.py`, `pi_zero_2w/run.py`, `server/utils/cameraWebrtcBridge.ts`, `server/utils/cameraStreamOrchestrator.ts`, `server/utils/cameraRecordingManager.ts`, `server/utils/cameraLogFlagStore.ts`, `src/cameras/page.tsx`, `src/_locales/{en,nl,de,fr}.json`, `.env`, `.env_template`.
+  - Also still uncommitted from prior sessions: `server/utils/cameraThumbnailExtractor.ts`.
 
 ## Next steps
 
-1. **User deploys + verifies** (see "User action required" below). Confirms whether the env-driven cadence is now wiring through end-to-end and whether auto mode responds within ~1s on mode switch.
-2. **User picks a fix for the boot-time camera race:**
-   - **Option A (one line):** defer the immediate-capture call in `pi_zero_2w/camera_node/thumbnail_publisher.py:63` (`await self._capture_and_publish()`) by 2-3 seconds with `await asyncio.sleep(3)` first, so a queued `startVideoStream` from the previous session wins the camera at boot.
-   - **Option B (more robust):** add a 3-attempt retry loop with 500ms backoff in `pi_zero_2w/camera_node/video_publisher.py` `start()` so `rpicam-vid` waits for `rpicam-jpeg` to release before giving up. Combine with auto-restart on returncode=234 in the publisher's stderr-drain exit path.
-3. **Once deploy validates the cadence change**, re-confirm on real hardware: at slider=80% in On mode, covering the lens must NOT change PWM (constant 80%); in Auto mode, covering the lens must ramp PWM up.
-4. **If everything verifies green**, commit the IR auto-mode + cadence work as one cohesive change. Suggested focus for the message: "auto-IR cadence env-configurable + immediate eval on mode switch + per-mode set_ir_strength on Pi Zero".
+The phases below are ordered. Do A then B then C (hardware) before D-G (software/verify). Anything in this checklist that fails should stop the chain — fix root cause, rerun the same step, then continue.
+
+### A. Rewire IR LED off GPIO 18 (PHYSICAL)
+
+1. **Power down Pi Zero:** `sudo poweroff`. Wait until the green LED stops blinking. Unplug the USB-C power.
+2. **Move the MOSFET gate jumper:** the Gate (pin 1 of the IRLB8748) is currently on Pi physical pin **12** (GPIO 18). Pull that jumper. Plug it into Pi physical pin **11** (GPIO **17**) instead.
+3. **Verify with multimeter (no power):** continuity beep from physical pin 11 to MOSFET gate leg. NO continuity from physical pin 12 to MOSFET gate leg. The 10 kOhm gate-to-GND pull-down stays exactly where it was.
+4. **Power back on, do not edit `.env` yet.** SSH in, `journalctl -u camera-node.service -f`. Expected: `IR device initialized on GPIO 18 (PWM @ 200 Hz)` (still 18 because we haven't flipped the env yet). The LED will not respond because the wire is on GPIO 17 now. This is expected — proceed.
+5. Edit `/opt/camera/pi_zero_2w/.env` and change `IR_GPIO_PIN=18` -> `IR_GPIO_PIN=17`.
+6. `sudo systemctl restart camera-node.service`. Confirm log line now reads `IR device initialized on GPIO 17 (PWM @ 200 Hz)`.
+7. Open `/cameras` in browser, take control of this camera, click IR ON. Confirm the LED ring lights up. Click OFF, confirm it goes out. Done with Step A only when this works.
+
+### B. Wire INMP441 mic + MAX98357A amp (PHYSICAL)
+
+Follow `HARDWARE_SUMMARY.md` §6.A step 2 exactly. Power must stay off until every jumper is double-checked. Quick-reference table:
+
+| Wire from | To Pi physical pin |
+|-----------|---------------------|
+| INMP441 VDD | 1 (3V3) |
+| INMP441 GND, L/R, SEL | blue rail (GND) |
+| INMP441 SCK | 12 (GPIO 18) |
+| INMP441 WS | 35 (GPIO 19) |
+| INMP441 SD | 38 (GPIO 20) |
+| MAX98357A VIN | 2 (5V) |
+| MAX98357A GND | blue rail |
+| MAX98357A BCLK | 12 (GPIO 18) — shared with INMP441 SCK |
+| MAX98357A LRC | 35 (GPIO 19) — shared with INMP441 WS |
+| MAX98357A DIN | 40 (GPIO 21) |
+| Speaker + / - | MAX98357A speaker terminals (4-8 Ohm, ≥1 W). Mount **≥10 cm from the mic** to avoid acoustic feedback. |
+
+Leave MAX98357A `GAIN` and `SD` pins floating. Power back on. The pi_zero is still running on the previous code, so audio overlays haven't been enabled — the boot probe will still report `microphone FAIL` and `speaker FAIL`. That's expected. Proceed to step C.
+
+### C. Enable I²S in `/boot/firmware/config.txt`
+
+```bash
+sudo sed -i 's/^dtparam=audio=on/#dtparam=audio=on/' /boot/firmware/config.txt
+echo 'dtoverlay=googlevoicehat-soundcard' | sudo tee -a /boot/firmware/config.txt
+sudo reboot
+```
+
+After reboot, `arecord -l` and `aplay -l` should each list one external "snd_rpi_googlevoicehat_soundcar" card (and **no** bcm2835 / vc4-hdmi entries, since `dtparam=audio=on` is now commented out).
+
+### D. Verify the I²S bus in isolation BEFORE any camera_node code touches it
+
+```bash
+arecord -D plughw:CARD=sndrpigooglevoi -d 3 -f S16_LE -r 48000 -c 1 /tmp/test.wav
+aplay   -D plughw:CARD=sndrpigooglevoi /tmp/test.wav
+```
+
+You should hear the 3 s of room audio play back through the speaker. If not, common failures:
+
+- **arecord prints "device not found"** -> overlay didn't load. `sudo dmesg | grep -iE "i2s|googlevoicehat"`. Check `/boot/firmware/config.txt` actually has the line you added.
+- **arecord runs but the file is silence (just a buzz)** -> mic L/R or SEL isn't tied to GND, or VDD isn't on 3V3.
+- **aplay runs but no sound from speaker** -> MAX98357A VIN is on 3V3 instead of 5V (very common mistake — it MUST be 5V), or the GAIN pin is grounded instead of floating, or the speaker leads are reversed/shorted.
+- **CPU is fine but audio is choppy** -> wrong sample rate. Stay at 48000.
+
+Do not move on from D until isolation loopback works. The whole rest of the stack is built on it.
+
+### E. Roll the new code + flip env vars
+
+#### Pi 5
+
+```bash
+git pull
+npm run build
+sudo systemctl restart luckystack
+journalctl -u luckystack -f
+```
+
+Confirm in the log:
+- `cameraStreamOrchestrator: enqueue startVideoStream for <id> ...`
+- (new) `cameraStreamOrchestrator: enqueue startAudioUplink ...`
+- (new) `cameraStreamOrchestrator: enqueue startAudioDownlink ...`
+
+If the camera was already streaming before the restart, the new audio commands fire on the next viewer-driven activation cycle.
+
+#### Pi Zero
+
+```bash
+git pull
+nano /opt/camera/pi_zero_2w/.env
+#   AUDIO_INPUT_DEVICE=                  -> AUDIO_INPUT_DEVICE=plughw:CARD=sndrpigooglevoi
+#   AUDIO_OUTPUT_DEVICE=                 -> AUDIO_OUTPUT_DEVICE=plughw:CARD=sndrpigooglevoi
+#   AUDIO_BITRATE_BPS=32000              (already there from the template)
+sudo systemctl restart camera-node.service
+journalctl -u camera-node.service -f
+```
+
+Confirm:
+- Boot probe banner now shows `microphone OK` and `speaker OK` (instead of FAIL).
+- When a viewer opens the cameras page: `[audio-publisher] start rtpHost=<pi5> rtpPort=<6600+...>`.
+- Same for the downlink: `[audio-subscriber] start localPort=<7600+...>`.
+
+If you see `[audio] start_audio_uplink ignored — AUDIO_INPUT_DEVICE unset`, the env var didn't load — check `nano` saved correctly and the service restarted.
+
+### F. End-to-end functional verification
+
+1. **Listen direction.** Open `/cameras`, click into a camera. Within a few seconds you should hear the room audio in your browser. Pi 5 log: `cameraAudioBridge[<cameraId>] first audio RTP packet received on port <port>`. Browser console should show no errors. Volume is governed by your device's system volume; the **System output** toggle in the audio panel acts as a per-tab mute.
+2. **Talk direction (single browser).**
+   - Take control of the camera (the existing PTZ / take-control flow).
+   - Toggle the **Mic uplink** switch ON. Browser will prompt for microphone permission — approve.
+   - Speak into your laptop/phone. Voice should come out of the Pi Zero speaker.
+   - Pi Zero log: `[audio-subscriber]` lines. ffmpeg log lines (with `audioPipeline` debug flag toggled in the cameras-page debug panel) should show frames flowing.
+   - Toggle Mic uplink OFF. Speaker should go silent within ~1 second.
+3. **Talk direction (two browsers, ownership lock).**
+   - Browser A: hold control + mic on.
+   - Browser B (different user): the **Mic uplink** toggle should be disabled, with a "<user A's name> is talking" caption underneath.
+   - Browser A: release control. Browser B's toggle should re-enable.
+4. **Recording with mixed audio.**
+   - Browser A holds control + mic on.
+   - Click "Start recording". Speak for ~10 seconds. Click "Stop recording".
+   - Open the resulting `.mp4` in VLC. Confirm:
+     - Video plays normally (H.264).
+     - Audio track is present and contains BOTH the room ambient (camera mic) AND the talker's voice mixed together.
+   - If audio is missing entirely, check Pi 5 logs for `subscribeAudioIngestRtp` callbacks firing.
+5. **Self-heal.** SSH to Pi Zero, `sudo pkill -f "ffmpeg.*libopus"`. Within a few seconds: `AudioPublisher self-heal: ... — restarting (attempt 1/5)` and audio should resume in the browser without page reload.
+
+### G. Commit + ship
+
+Once F.1 through F.5 all pass:
+
+```bash
+git add HARDWARE_SUMMARY.md \
+        pi_zero_2w/.env.example pi_zero_2w/run.py \
+        pi_zero_2w/camera_node/{audio_publisher.py,audio_subscriber.py,config.py,log_flags.py,command_executor.py} \
+        pi_zero_2w/camera_node/adapters/{base.py,raspberry_pi_adapter.py,mock_adapter.py} \
+        server/utils/{cameraAudioBridge.ts,cameraWebrtcBridge.ts,cameraStreamOrchestrator.ts,cameraRecordingManager.ts,cameraMicState.ts,cameraLogFlagStore.ts} \
+        src/cameras/_api/setMicEnabled_v1.ts \
+        src/cameras/_sync/micEnabledChanged_server_v1.ts \
+        src/cameras/page.tsx \
+        src/_locales/*.json \
+        .env_template
+git commit -m "2-way audio: I2S INMP441 mic + MAX98357A speaker, control-session-gated talk, mixed audio in recordings"
+```
+
+(Do NOT add `.env` — it has secrets and the dev-only `=1` cadence override; only commit `.env_template`.)
+
+If you also want to commit the prior-session `cameraThumbnailExtractor.ts` change at the same time, decide whether it logically belongs in this commit or a separate one before staging.
 
 ## User action required
 
-1. Deploy:
-   - Pi 5: `git pull && npm run build && sudo systemctl restart luckystack`
-   - Pi Zero: `git pull`, then add `THUMBNAIL_INTERVAL_SEC=1` to `/var/www/CameraSysteem/pi_zero_2w/.env` (or wherever your `.env` lives), then `sudo systemctl restart camera_node`.
-2. Verify in `journalctl -u luckystack -f` that the startup log shows `[thumbnail-extractor] start cameraId=... intervalSec=1` once a viewer connects.
-3. Verify in `journalctl -u camera_node -f` that `[thumbnail] published` lines appear roughly once per second when no stream is active (Pi Zero fallback) and that `[ir] cameraId=... mode=auto APPLY target=...` fires immediately after clicking Auto in the UI (no 30s delay).
-4. With `ir` debug enabled on a test camera, verify:
-   - On mode at slider=80%: covering the lens leaves PWM constant at 80%.
-   - Auto mode: covering the lens ramps PWM up; uncovering ramps it down (with 2-sample off-hysteresis).
-5. **Decide A vs B** for the boot-time camera-acquisition race fix and tell me which to implement.
+These are the things only you can do:
+
+1. **Hardware:** rewire IR (Step A) and wire I²S (Step B) physically.
+2. **OS config:** edit `/boot/firmware/config.txt` and reboot the Pi Zero (Step C).
+3. **Bus loopback test:** run the `arecord | aplay` round-trip (Step D) before touching camera_node code.
+4. **Deploy:** `git pull` on both hosts, `npm run build` on Pi 5, edit Pi Zero `.env` to flip `IR_GPIO_PIN=17` and set `AUDIO_INPUT_DEVICE` / `AUDIO_OUTPUT_DEVICE`, restart both services (Step E).
+5. **Verify:** F.1 through F.5 — listen, talk, lock, recording, self-heal.
+6. **Decide on commit shape** for Step G (one cohesive 2-way-audio commit, or split out the thumbnail extractor change).
+
+If anything in F fails, capture the relevant `journalctl` excerpt (Pi 5 + Pi Zero) and the browser console errors before retrying — the failure mode tells me exactly which subsystem to look at next.

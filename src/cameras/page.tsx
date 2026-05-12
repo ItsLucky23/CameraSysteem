@@ -108,8 +108,10 @@ type CommandAction =
   | 'recordStart'
   | 'recordStop';
 
-// Tilt is still positional (no continuous-rotation tilt servo wired yet).
-type PtzAction = 'tiltUp' | 'tiltDown';
+// Positional press-and-hold for all four axes. Each held button fires the
+// matching action every PTZ_HOLD_INTERVAL_MS; the Pi Zero translates each
+// command into a ±PTZ_STEP° step on the matching servo.
+type PtzAction = 'tiltUp' | 'tiltDown' | 'panLeft' | 'panRight';
 
 // MOTION DETECTION LOGIC (start) — only consumer was motionLabel; verified via grep
 // const formatRelativeAgo = (iso: string | null, now: number): string => {
@@ -1499,10 +1501,12 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
                 <div className="absolute bottom-4 left-4 z-30">
                   <div className="relative h-[140px] w-[140px] rounded-full border border-white/15 bg-black/45 backdrop-blur">
-                    {/* Tilt buttons: positional model (each pulse = ±PTZ_STEP° via repeated panLeft/panRight commands) */}
+                    {/* PTZ buttons: positional press-and-hold. Each hold ticks at PTZ_HOLD_INTERVAL_MS; one tick = ±PTZ_STEP° on the matching servo. */}
                     {([
                       { dir: 'tiltUp' as PtzAction, icon: 'keyboard_arrow_up', cls: 'absolute left-1/2 top-2 -translate-x-1/2' },
                       { dir: 'tiltDown' as PtzAction, icon: 'keyboard_arrow_down', cls: 'absolute bottom-2 left-1/2 -translate-x-1/2' },
+                      { dir: 'panLeft' as PtzAction, icon: 'keyboard_arrow_left', cls: 'absolute left-2 top-1/2 -translate-y-1/2' },
+                      { dir: 'panRight' as PtzAction, icon: 'keyboard_arrow_right', cls: 'absolute right-2 top-1/2 -translate-y-1/2' },
                     ]).map((btn) => (
                       <button
                         key={btn.dir}
@@ -1516,28 +1520,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                         onPointerUp={stopPtzHold}
                         onPointerLeave={stopPtzHold}
                         onPointerCancel={stopPtzHold}
-                        className={`${btn.cls} flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50`}
-                      >
-                        <MaterialIcon name={btn.icon} size={20} />
-                      </button>
-                    ))}
-                    {/* Pan buttons: continuous-rotation model. pointerDown -> panStart{Left,Right} (single command, servo starts spinning), pointerUp -> panStop (single command, servo stops). No repeat interval. */}
-                    {([
-                      { startAction: 'panStartLeft' as CommandAction, icon: 'keyboard_arrow_left', cls: 'absolute left-2 top-1/2 -translate-y-1/2' },
-                      { startAction: 'panStartRight' as CommandAction, icon: 'keyboard_arrow_right', cls: 'absolute right-2 top-1/2 -translate-y-1/2' },
-                    ]).map((btn) => (
-                      <button
-                        key={btn.startAction}
-                        type="button"
-                        disabled={panTiltDisabled}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          if (panTiltDisabled) return;
-                          void sendCommand(btn.startAction);
-                        }}
-                        onPointerUp={() => { void sendCommand('panStop'); }}
-                        onPointerLeave={() => { void sendCommand('panStop'); }}
-                        onPointerCancel={() => { void sendCommand('panStop'); }}
                         className={`${btn.cls} flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50`}
                       >
                         <MaterialIcon name={btn.icon} size={20} />

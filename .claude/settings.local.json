@@ -11,7 +11,8 @@
       "Bash(npm run *)",
       "Bash(echo \"EXIT=$?\")",
       "Bash(Get-ChildItem -Path \"E:\\\\code\\\\CameraSysteem\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "PowerShell(npm run *)"
     ]
   }
 }

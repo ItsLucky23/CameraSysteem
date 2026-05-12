@@ -105,6 +105,8 @@ Before powering anything on, verify with a meter:
 
 ## 5b. Servo safety (READ BEFORE WIRING)
 
+> **For the full pan/tilt status (current state, action plan when a new servo arrives, decision tree for positional vs continuous-rotation, list of test scripts, what to buy), see `pi_zero_2w/SERVO_PLAYBOOK.md`.** This section covers the hardware-safety rules only.
+
 We lost two SG90s to runaway spinning because the signal wire was **floating** during Pi boot / between PWM updates. Many "SG90" units sold cheaply online are actually **continuous-rotation** servos — they have no internal end-stops, so a floating signal line picks up EMI ("antenna effect") and the servo spins at full speed indefinitely. Continuous spin at 5 V → stall current → melted plastic / fire.
 
 **Mandatory safety rules:**
