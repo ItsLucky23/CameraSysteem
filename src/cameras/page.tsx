@@ -91,7 +91,6 @@ interface ControlSessionState {
 const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
 const ZOOM_STEP = 0.5;
-const PTZ_HOLD_INTERVAL_MS = 250;
 
 const PREVIEW_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -108,9 +107,8 @@ type CommandAction =
   | 'recordStart'
   | 'recordStop';
 
-// Positional press-and-hold for all four axes. Each held button fires the
-// matching action every PTZ_HOLD_INTERVAL_MS; the Pi Zero translates each
-// command into a ±PTZ_STEP° step on the matching servo.
+// Click-per-step for all four axes. Each click fires one command; the Pi Zero
+// adapter translates it into a ±PTZ_STEP° step on the matching servo.
 type PtzAction = 'tiltUp' | 'tiltDown' | 'panLeft' | 'panRight';
 
 // MOTION DETECTION LOGIC (start) — only consumer was motionLabel; verified via grep
@@ -220,9 +218,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
 
   // Wall-clock tick used for relative timestamps (motion ago, control TTL).
   const [now, setNow] = useState<number>(() => Date.now());
-
-  // Hold-to-move PTZ — interval ref so onPointerDown/Up can stop the loop.
-  const ptzHoldTimerRef = useRef<ReturnType<typeof globalThis.setInterval> | null>(null);
 
   const forcedCameraId = params?.id ?? params?.cameraId ?? params?.cameraid ?? searchParams?.cameraId ?? searchParams?.id ?? null;
 
@@ -765,26 +760,6 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
     }
     await acquireControl({ takeOver: false });
   }, [acquireControl, controlSession, selectedCameraId, session?.id, translate]);
-
-  const stopPtzHold = useCallback(() => {
-    if (ptzHoldTimerRef.current === null) return;
-    globalThis.clearInterval(ptzHoldTimerRef.current);
-    ptzHoldTimerRef.current = null;
-  }, []);
-
-  const startPtzHold = useCallback((action: PtzAction) => {
-    stopPtzHold();
-    // Fire once immediately, then on a 250ms cadence while the button is held.
-    // The server's 200ms PTZ cooldown lets this rhythm flow without rejection.
-    void sendCommand(action);
-    ptzHoldTimerRef.current = globalThis.setInterval(() => {
-      void sendCommand(action);
-    }, PTZ_HOLD_INTERVAL_MS);
-  }, [sendCommand, stopPtzHold]);
-
-  // Stop any in-flight PTZ hold when the user navigates away or switches cameras.
-  useEffect(() => () => { stopPtzHold(); }, [stopPtzHold]);
-  useEffect(() => { stopPtzHold(); }, [selectedCameraId, stopPtzHold]);
 
   // Auto-release control on unmount or camera switch. Best-effort fire-and-
   // forget: if the socket is already gone, the server's TTL cleans up.
@@ -1499,9 +1474,9 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                 )} */}
                 {/* MOTION DETECTION LOGIC (end) */}
 
-                <div className="absolute bottom-4 left-4 z-30">
+                <div className="absolute bottom-4 left-4 z-30 flex flex-col items-center">
                   <div className="relative h-[140px] w-[140px] rounded-full border border-white/15 bg-black/45 backdrop-blur">
-                    {/* PTZ buttons: positional press-and-hold. Each hold ticks at PTZ_HOLD_INTERVAL_MS; one tick = ±PTZ_STEP° on the matching servo. */}
+                    {/* PTZ buttons: click-per-step. One click = one ±PTZ_STEP° move on the matching positional servo. */}
                     {([
                       { dir: 'tiltUp' as PtzAction, icon: 'keyboard_arrow_up', cls: 'absolute left-1/2 top-2 -translate-x-1/2' },
                       { dir: 'tiltDown' as PtzAction, icon: 'keyboard_arrow_down', cls: 'absolute bottom-2 left-1/2 -translate-x-1/2' },
@@ -1512,14 +1487,7 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                         key={btn.dir}
                         type="button"
                         disabled={panTiltDisabled}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          if (panTiltDisabled) return;
-                          startPtzHold(btn.dir);
-                        }}
-                        onPointerUp={stopPtzHold}
-                        onPointerLeave={stopPtzHold}
-                        onPointerCancel={stopPtzHold}
+                        onClick={() => { void sendCommand(btn.dir); }}
                         className={`${btn.cls} flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white disabled:opacity-50`}
                       >
                         <MaterialIcon name={btn.icon} size={20} />
@@ -1533,6 +1501,9 @@ export default function CamerasPage({ params, searchParams }: PageProps) {
                     >
                       <MaterialIcon name="my_location" size={18} />
                     </button>
+                  </div>
+                  <div className="mt-2 rounded-md bg-black/45 px-2 py-0.5 font-mono text-[11px] text-white/85 backdrop-blur">
+                    P {cameraState ? `${String(cameraState.pan)}°` : '—'} · T {cameraState ? `${String(cameraState.tilt)}°` : '—'}
                   </div>
                 </div>
 

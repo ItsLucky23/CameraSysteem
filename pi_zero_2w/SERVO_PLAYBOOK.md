@@ -1,16 +1,16 @@
 # Pan/tilt servo playbook
 
-Status snapshot as of session 2026-05-03, plus the action plan for when a working servo is in hand.
+Status snapshot as of session 2026-05-12.
 
 ---
 
 ## TL;DR — current state
 
-- **Pan servo (GPIO 12 / pin 32):** wired but non-functional. The current physical unit (and the two before it) all have a defective dead zone — no PWM pulse width holds the servo still. Suspected root cause: bad batch from the original seller. Two prior units burned out from runaway spinning (antenna effect — no pull-down at the time).
-- **Tilt servo (GPIO 13 / pin 33):** never wired. Not blocking anything.
-- **Wiring is now safe:** 10 kΩ pull-down on GPIO 12 → GND, external 5 V via HW-131, common ground tied. No more fire risk even if a future servo also lacks a dead zone, because the pull-down forces the line LOW when our code isn't actively driving it.
-- **Code is shipped and works** assuming the servo cooperates. If you plug in a healthy positional MG90S or SG90 today, the pan buttons in the cameras page will respond. The CR press-and-hold path is also live and would work with a healthy CR servo.
-- **Next concrete step:** buy a single real Tower Pro MG90S (positional, has end-stops, can't run away) from a reputable seller and follow the "When a new servo arrives" section below.
+- **Pan servo (GPIO 12 / pin 32):** working. Positional 180° unit on external 5 V (HW-131), 10 kΩ pull-down to GND, common ground tied. Driven by `gpiozero.AngularServo` using the **pigpio** backend (DMA PWM, sub-µs jitter). Pulse range 0.5-2.5 ms, full ±90° travel. The servo stays energised between moves — pigpio's clean PWM avoids the hunt, and an earlier auto-detach was removed because losing the pulse made cheap servos snap to neutral between fast clicks.
+- **Tilt servo (GPIO 13 / pin 33):** not yet wired. Plug-and-play: same wiring, same `pigpio` backend, same click-per-step UI handles it.
+- **UI:** click-per-step on the cameras page. One click = one `PTZ_STEP°` move (default 10°). Small live-angle overlay below the PTZ pad reads `cameraState.pan`/`tilt`.
+- **Required runtime:** `pigpiod` systemd service must be running on the Pi Zero. `gpiozero` falls back to `LGPIOFactory` (software PWM, tens of µs jitter) otherwise → servo positions become random. `run.py` sets `GPIOZERO_PIN_FACTORY=pigpio` at import time. See `HARDWARE_SUMMARY.md` §7 for install steps.
+- **Continuous-rotation press-and-hold code path** (`panStartLeft` / `panStartRight` / `panStop` and `startPtzHold` / `stopPtzHold`) is kept as dead code for a possible future CR servo; the UI no longer uses it.
 
 ---
 
@@ -110,17 +110,15 @@ New servo plugged in (10kΩ pull-down already in place from before)
 └── (Tilt servo? Wire it the same way on GPIO 13 + add a second pull-down to pin 6)
 ```
 
-### Path A: Positional servo (RECOMMENDED — no fire risk, simpler code)
+### Path A: Positional servo (current setup — no fire risk, simple control)
 
 1. **Wire it** the same way as documented in `HARDWARE_SUMMARY.md` §4.B. Pull-down stays.
 2. **Run `test_pan_servo.py`.** Step A: servo seeks to 0° and holds. Step B: nudges to +5°. Step C: nudges to -5°. All steps should pass cleanly because positional servos have hard internal end-stops — they can't run away.
-3. **Revert the UI to the click-pulse model** (since press-and-hold doesn't make sense for positional). One file change in `src/cameras/page.tsx`:
-   - In the PTZ button JSX, change the pan-buttons block back to using `startPtzHold(btn.dir)` / `stopPtzHold` with `dir: 'panLeft'` / `'panRight'` (matching the existing tilt buttons' shape)
-   - Optionally remove `panStartLeft` / `panStartRight` / `panStop` from `CommandAction` if you don't want the dead types lying around
-4. **Optional: bump `PTZ_STEP`** in `pi_zero_2w/.env` from the default 5° to something like 15° if individual clicks feel too small. Each click moves the servo by `PTZ_STEP` degrees.
-5. **Test from the cameras page.** Hold pan-right — servo should step right at ~5 Hz while held, stop on release. Same for tilt if wired.
+3. **The UI is click-per-step.** In `src/cameras/page.tsx` each PTZ button uses a single `onClick` that fires one pan/tilt command per click. One click = one `PTZ_STEP°` move. A small live-angle overlay below the PTZ pad reads the current pan/tilt from `cameraState`.
+4. **Default `PTZ_STEP=10°`.** Override in `pi_zero_2w/.env` if 10° feels too coarse (try 5°) or too fine (try 15°). Each click moves the servo by `PTZ_STEP` degrees, clamped to ±90°.
+5. **Test from the cameras page.** Click pan-right once → servo moves `PTZ_STEP°`, the overlay updates with the new angle. Servo stays energised between clicks (small steady hum is normal — that's the motor holding position). 6-18 clicks (depending on `PTZ_STEP`) take you from -90° to +90°.
 
-You can leave the new continuous-rotation actions (`panStartLeft` etc.) in the codebase; they just won't be used. Or strip them out for cleanliness.
+The unused continuous-rotation actions (`panStartLeft` / `panStartRight` / `panStop`) and the press-and-hold helpers (`startPtzHold` / `stopPtzHold` / `ptzHoldTimerRef` / `PTZ_HOLD_INTERVAL_MS`) are kept in the codebase as dead code in case a CR servo is added later. Strip out separately for cleanliness if desired.
 
 ### Path B: Continuous-rotation servo (only if you intentionally want one)
 

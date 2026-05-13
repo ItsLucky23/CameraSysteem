@@ -140,7 +140,7 @@ def load_settings() -> NodeSettings:
         http_timeout_sec=max(1.0, _parse_float(os.getenv("HTTP_TIMEOUT_SEC"), 8.0)),
         verify_tls=_parse_bool(os.getenv("VERIFY_TLS"), True),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO",
-        ptz_step=max(1, _parse_int(os.getenv("PTZ_STEP"), 5)),
+        ptz_step=max(1, _parse_int(os.getenv("PTZ_STEP"), 10)),
         cpu_temp_path=os.getenv("CPU_TEMP_PATH", "/sys/class/thermal/thermal_zone0/temp").strip(),
         ir_gpio_pin=_parse_optional_int(os.getenv("IR_GPIO_PIN")),
         ir_boot_self_test=_parse_bool(os.getenv("IR_BOOT_SELF_TEST"), False),

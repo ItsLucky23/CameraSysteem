@@ -70,14 +70,6 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         self._ir_device = None
         self._pan_servo = None
         self._tilt_servo = None
-        # Idle-detach scheduling: after each pan/tilt move we wait briefly so
-        # the servo physically reaches the target, then call detach() to stop
-        # the PWM pulse. With the motor de-energized, gear-friction holds the
-        # position and the servo stops "hunting" on minor signal jitter. A new
-        # move command cancels the pending detach so press-and-hold stays
-        # continuous.
-        self._pan_detach_task: asyncio.Task | None = None
-        self._tilt_detach_task: asyncio.Task | None = None
         # MOTION DETECTION LOGIC (start)
         # self._motion_sensor = None
         # MOTION DETECTION LOGIC (end)
@@ -222,12 +214,6 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         await self._audio_subscriber.stop()
         await self._stop_recording_process()
 
-        for task in (self._pan_detach_task, self._tilt_detach_task):
-            if task is not None and not task.done():
-                task.cancel()
-        self._pan_detach_task = None
-        self._tilt_detach_task = None
-
         self._close_servo(self._pan_servo)
         self._close_servo(self._tilt_servo)
         self._pan_servo = None
@@ -284,9 +270,6 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         logger.info("[ptz] pan delta=%s previous=%s new=%s servo_attached=%s",
                     delta, previous, self._state.pan, self._pan_servo is not None)
         self._set_servo_angle(self._pan_servo, self._state.pan)
-        self._pan_detach_task = self._schedule_idle_detach(
-            self._pan_servo, self._pan_detach_task
-        )
 
     async def tilt(self, delta: int) -> None:
         previous = self._state.tilt
@@ -294,9 +277,6 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
         logger.info("[ptz] tilt delta=%s previous=%s new=%s servo_attached=%s",
                     delta, previous, self._state.tilt, self._tilt_servo is not None)
         self._set_servo_angle(self._tilt_servo, self._state.tilt)
-        self._tilt_detach_task = self._schedule_idle_detach(
-            self._tilt_servo, self._tilt_detach_task
-        )
 
     async def start_pan_continuous(self, *, direction: str) -> None:
         # Continuous-rotation servo: angle maps to speed + direction.
@@ -551,31 +531,6 @@ class RaspberryPiHardwareAdapter(HardwareAdapter):
 
         with contextlib.suppress(Exception):
             servo.angle = angle  # type: ignore[attr-defined]
-
-    @staticmethod
-    def _schedule_idle_detach(
-        servo: object | None,
-        existing_task: asyncio.Task | None,
-    ) -> asyncio.Task | None:
-        # Cancels any pending detach for this axis and schedules a fresh one.
-        # During press-and-hold the executor sends a new command every ~250ms,
-        # so the detach (delay 0.6s) is always cancelled before it fires —
-        # PWM stays continuous while moving. Once commands stop, the last
-        # scheduled detach fires and the motor goes quiet.
-        if servo is None:
-            return None
-        if existing_task is not None and not existing_task.done():
-            existing_task.cancel()
-
-        async def _detach_after_idle() -> None:
-            try:
-                await asyncio.sleep(0.6)
-                with contextlib.suppress(Exception):
-                    servo.detach()  # type: ignore[attr-defined]
-            except asyncio.CancelledError:
-                pass
-
-        return asyncio.create_task(_detach_after_idle())
 
     @staticmethod
     def _close_servo(servo: object | None) -> None:
